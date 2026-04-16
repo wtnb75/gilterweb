@@ -43,6 +43,7 @@ gilterweb/
 - 設定読み込み: `gopkg.in/yaml.v3` を使用
 - HTTPハンドラは `http.Handler` インタフェースを実装した構造体として定義
 - ミドルウェアは関数チェーン `func(http.Handler) http.Handler` で実装
+- `server` サブコマンドは SIGHUP を監視し、設定ホットリロード（成功時のみ反映・失敗時は旧設定維持）を実装
 
 ## Linter 設定 (.golangci.yml)
 
@@ -98,7 +99,7 @@ cover:
 - `go vet ./...` がエラーなしで通ること
 - カバレッジ 90% 以上
 - `go build ./...` がエラーなしで通ること
-- `example-config.yaml` が `config check` サブコマンドでバリデーション通過すること
+- `example-config.yaml` が `validate` サブコマンドでバリデーション通過すること
 
 ## 開発フロー
 
