@@ -1,18 +1,18 @@
 # gilterweb — Agent Instructions
 
-Go製のWebサーバプロジェクト。プログラムの仕様は [SPEC.md](SPEC.md) を参照。
+Go-based web server project. See [SPEC.md](SPEC.md) for runtime behavior and feature semantics.
 
-## プロジェクト概要
+## Project Summary
 
-- 言語: Go
-- 主機能: `server` サブコマンドで起動するHTTPサーバ
-- 設定: YAMLファイル
+- Language: Go
+- Main feature: HTTP server started by the `server` subcommand
+- Config format: YAML
 - Linter: golangci-lint
-- テストカバレッジ目標: 90%以上
+- Unit test coverage target: 90%+
 
-## ディレクトリ構造
+## Directory Layout
 
-```
+```text
 gilterweb/
 ├── AGENTS.md
 ├── SPEC.md
@@ -21,32 +21,33 @@ gilterweb/
 ├── go.sum
 ├── .golangci.yml
 ├── .gitignore
-├── config.go          # 設定構造体・読み込みロジック
+├── config.go
 ├── config_test.go
-├── handler.go         # HTTPハンドラ
+├── handler.go
 ├── handler_test.go
-├── server.go          # サーバ起動ロジック
+├── server.go
 ├── server_test.go
 ├── cmd/
 │   └── gilterweb/
-│       └── main.go    # エントリーポイント（サブコマンド定義）
+│       └── main.go
 ├── example-config.yaml
 └── cover.out
 ```
 
-## コーディング規約
+## Coding Rules
 
-- パッケージ名: `gilterweb`（main パッケージは `cmd/gilterweb/`）
-- エラーハンドリング: `fmt.Errorf("...: %w", err)` でラップ
-- ログ: `log/slog` を使用（構造化ログ）
-- CLIフレームワーク: `github.com/spf13/cobra` を使用
-- 設定読み込み: `gopkg.in/yaml.v3` を使用
-- `server` は TCP/Unix Domain Socket 両対応、`http` フィルタも TCP/UDS 両対応
-- HTTPハンドラは `http.Handler` インタフェースを実装した構造体として定義
-- ミドルウェアは関数チェーン `func(http.Handler) http.Handler` で実装
-- `server` サブコマンドは SIGHUP を監視し、設定ホットリロード（成功時のみ反映・失敗時は旧設定維持）を実装
+- Package naming: use `gilterweb` (main package under `cmd/gilterweb/`)
+- Error wrapping: use `fmt.Errorf("...: %w", err)`
+- Logging: use structured logging with `log/slog`
+- CLI framework: use `github.com/spf13/cobra`
+- YAML parsing/loading: use `gopkg.in/yaml.v3`
+- `server` supports TCP and Unix Domain Socket listeners
+- `http` filter supports outbound HTTP over both TCP and UDS
+- HTTP handlers should be explicit `http.Handler` implementations
+- Middleware shape: `func(http.Handler) http.Handler`
+- `server` must handle SIGHUP for config hot reload (apply only on successful validation, keep old config on failure)
 
-## Linter 設定 (.golangci.yml)
+## Linter Baseline (`.golangci.yml`)
 
 ```yaml
 version: "2"
@@ -66,25 +67,23 @@ formatters:
     - gofmt
 ```
 
-## テスト規約
+## Testing Rules
 
-- カバレッジ目標: **90%以上**
-- `go test -v -cover -coverprofile=cover.out ./...` で計測
-- テストファイルは実装ファイルと同じパッケージに置く（`_test` サフィックスパッケージは統合テストのみ）
-- HTTPハンドラのテストは `net/http/httptest` を使用
-- 設定ファイル読み込みのテストはテンポラリファイルを使用（`t.TempDir()`）
+- Coverage target: **90%+**
+- Coverage command: `go test -v -cover -coverprofile=cover.out ./...`
+- Keep tests in the same package as implementation (`_test` external package only when needed)
+- HTTP handler tests should use `net/http/httptest`
+- Config loading tests should use temporary files from `t.TempDir()`
 
-## Taskfile.yml タスク
+## Taskfile Tasks
 
-| タスク | 説明 |
-|---|---|
-| `task test` | テスト実行・カバレッジ計測・HTMLレポート生成 |
-| `task lint` | `go fix` + `go fmt` + `golangci-lint run` |
-| `task build` | `go build ./cmd/gilterweb/` |
-| `task run` | `go run ./cmd/gilterweb/ server` |
-| `task cover` | カバレッジが90%未満なら失敗 |
+- `task test`: run tests + coverage + HTML report
+- `task lint`: `go fix` + `go fmt` + `golangci-lint run`
+- `task build`: `go build ./cmd/gilterweb/`
+- `task run`: `go run ./cmd/gilterweb/ server`
+- `task cover`: fail when total coverage is below 90%
 
-`cover` タスクの実装例:
+`cover` task example:
 
 ```yaml
 cover:
@@ -94,19 +93,19 @@ cover:
     - go tool cover -func=cover.out | awk '/^total:/{if ($3+0 < 90) {print "Coverage "$3" < 90%"; exit 1}}'
 ```
 
-## 品質基準
+## Quality Gates
 
-- `golangci-lint run` がエラーなしで通ること
-- `go vet ./...` がエラーなしで通ること
-- カバレッジ 90% 以上
-- `go build ./...` がエラーなしで通ること
-- `example-config.yaml` が `validate` サブコマンドでバリデーション通過すること
+- `golangci-lint run` passes with zero errors
+- `go vet ./...` passes with zero errors
+- Coverage is >= 90%
+- `go build ./...` succeeds
+- `example-config.yaml` passes the `validate` subcommand
 
-## 開発フロー
+## Development Flow
 
-1. `SPEC.md` を確認して実装対象の仕様を把握する
-2. 設定構造体・読み込みロジック (`config.go`) を実装しテストを書く
-3. HTTPハンドラ (`handler.go`) を実装しテストを書く
-4. サーバ起動ロジック (`server.go`) を実装しテストを書く
-5. `cmd/gilterweb/main.go` でサブコマンドを組み立てる
-6. `task lint` と `task cover` を通してから PR を出す
+1. Read `SPEC.md` first
+2. Implement and test config model/loading in `config.go`
+3. Implement and test HTTP handlers in `handler.go`
+4. Implement and test server runtime in `server.go`
+5. Wire subcommands in `cmd/gilterweb/main.go`
+6. Run `task lint` and `task cover` before opening a PR
