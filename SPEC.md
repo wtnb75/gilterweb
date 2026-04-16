@@ -133,6 +133,8 @@ log:
 filters:
   - id: string        # フィルタID（paths から参照）
     type: string      # フィルタ種別（後述）
+    depends_on:       # 依存フィルタID（省略可）
+      - string
     params: any       # 種別ごとのパラメータ
 
 paths:
@@ -154,6 +156,7 @@ paths:
 - `log.format`: `json` / `text` のいずれか
 - `filters[].id`: 重複不可、空文字列不可
 - `filters[].type`: 定義済み種別のいずれか
+- `filters[].depends_on`: 定義済みフィルタ ID のみ、循環参照禁止
 - `paths[].filter`: 定義済みフィルタ ID を参照すること
 - `paths[].headers`: キー・値とも文字列（省略可）
 
@@ -355,6 +358,41 @@ params:
 
 TTL 内は対象フィルタを再実行せず前回結果を返す。キャッシュはプロセス内メモリ。
 
+## フィルタ選択と実行戦略
+
+目的: 必要フィルタのみ実行。重い処理（`exec` など）重複実行 回避。
+
+ルール:
+
+- リクエストごとに実行対象 root は `paths[].filter` の 1 つ
+- 実行対象は root から到達可能な依存フィルタ集合のみ
+  - 依存元: `depends_on`
+  - 依存元: `static` などのテンプレート参照（例: `{{.A.stdout}}`）
+- 到達不能フィルタは実行しない
+- 同一リクエスト内で同一 filter ID は最大 1 回実行（メモ化）
+
+実行手順:
+
+1. `paths` から一致ルート取得
+2. 依存グラフ構築（`depends_on` + テンプレート参照）
+3. 循環検出（検出時エラー）
+4. トポロジカル順で評価
+5. 各フィルタ結果を `resultMap[id]` へ保存
+6. 参照時は `resultMap` 再利用
+
+例（A/B/C）:
+
+- A: `type=exec`
+- B: `type=static`, `params: "out={{.A.stdout}} err={{.A.stderr}}"`
+- C: 無関係
+- `paths[].filter = B`
+
+このとき:
+
+- A は 1 回だけ実行（stdout/stderr 同一結果オブジェクトから参照）
+- B 実行
+- C 未実行
+
 ### フィルタ結果データモデル
 
 各フィルタの実行結果はフィルタ ID をキーとしてコンテキストに格納され、後続フィルタのテンプレートから参照できる。
@@ -439,9 +477,10 @@ type LogConfig struct {
 }
 
 type FilterConfig struct {
-    ID     string `yaml:"id"`
-    Type   string `yaml:"type"`
-    Params any    `yaml:"params"`
+  ID        string   `yaml:"id"`
+  Type      string   `yaml:"type"`
+  DependsOn []string `yaml:"depends_on"`
+  Params    any      `yaml:"params"`
 }
 
 type PathConfig struct {
