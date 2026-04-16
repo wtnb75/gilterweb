@@ -41,6 +41,7 @@ gilterweb/
 - ログ: `log/slog` を使用（構造化ログ）
 - CLIフレームワーク: `github.com/spf13/cobra` を使用
 - 設定読み込み: `gopkg.in/yaml.v3` を使用
+- `server` は TCP/Unix Domain Socket 両対応、`http` フィルタも TCP/UDS 両対応
 - HTTPハンドラは `http.Handler` インタフェースを実装した構造体として定義
 - ミドルウェアは関数チェーン `func(http.Handler) http.Handler` で実装
 - `server` サブコマンドは SIGHUP を監視し、設定ホットリロード（成功時のみ反映・失敗時は旧設定維持）を実装
