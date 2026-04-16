@@ -571,7 +571,7 @@ Notes:
 - Request body must be read once and reused from shared cache
 - For header keys containing `-`, use `index`
   - `{{index .req.headers "User-Agent"}}`
-- **Security**: All `.req` fields (query, headers, body, etc.) are treated as **literal string values**. Template syntax in user input (e.g., `?name={{.A.stdout}}`) is not interpreted as template code; it is stored as a literal string. This prevents Server-Side Template Injection (SSTI) attacks.
+- **Security**: `.req` is treated as input data only. String values from user input remain literal strings (template syntax such as `?name={{.A.stdout}}` is never re-evaluated as template code). Structured values like `.req.body` may be parsed (JSON/form) but are still treated as data, not template source. This prevents Server-Side Template Injection (SSTI) attacks.
 
 POST JSON example:
 
@@ -672,6 +672,8 @@ Match policy:
 
 Path matching is case-sensitive and requires an exact string match. For example, `/foo` matches only `/foo`, not `/foo/`, `/foobar`, or `/foo/bar`.
 
+If no route matches, server mode returns `404 Not Found`.
+
 `check` uses the same match policy.
 
 ### Response Formatting
@@ -679,7 +681,9 @@ Path matching is case-sensitive and requires an exact string match. For example,
 HTTP status codes:
 
 - `200 OK`: successful filter execution
-- `500 Internal Server Error`: filter execution fails, config invalid, or no route match
+- `404 Not Found`: no route match
+- `413 Payload Too Large`: request body exceeds `server.max_body_size`
+- `500 Internal Server Error`: filter execution fails or request timeout
 
 Response headers:
 
@@ -704,6 +708,14 @@ Error detail and information disclosure policy:
 - Detailed diagnostics are written only to server logs with the same `request_id` for correlation
 - In development mode, diagnostics are still logged, but HTTP payload format remains unchanged
 - `check` subcommand is an operator-facing CLI and may print detailed errors to stderr
+
+Error code mapping (server mode):
+
+- `ROUTE_NOT_FOUND`: no route matched
+- `REQUEST_BODY_TOO_LARGE`: request body exceeds `server.max_body_size`
+- `REQUEST_TIMEOUT`: request exceeded `server.request_timeout`
+- `FILTER_OUTPUT_TOO_LARGE`: filter output exceeds `server.max_filter_output_size`
+- `FILTER_EXECUTION_FAILED`: other filter execution failures
 
 ## Config Hot Reload (SIGHUP)
 

@@ -31,6 +31,7 @@ gilterweb/
 │   └── gilterweb/
 │       └── main.go
 ├── example-config.yaml
+├── gilterweb            # local build artifact (do not commit)
 └── cover.out
 ```
 
