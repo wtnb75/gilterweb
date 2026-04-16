@@ -34,6 +34,18 @@ gilterweb/
 └── cover.out
 ```
 
+Version embedding in `cmd/gilterweb/main.go`:
+
+```go
+package main
+
+var (
+    Version = "dev"     // set by ldflags -X main.Version=...
+    Commit  = "unknown" // set by ldflags -X main.Commit=...
+    Built   = "unknown" // set by ldflags -X main.Built=...
+)
+```
+
 ## Coding Rules
 
 - Package naming: use `gilterweb` (main package under `cmd/gilterweb/`)
@@ -79,9 +91,25 @@ formatters:
 
 - `task test`: run tests + coverage + HTML report
 - `task lint`: `go fix` + `go fmt` + `golangci-lint run`
-- `task build`: `go build ./cmd/gilterweb/`
+- `task build`: build with embedded version info (from git tag/commit/timestamp)
 - `task run`: `go run ./cmd/gilterweb/ server`
 - `task cover`: fail when total coverage is below 90%
+
+`build` task extracts version info from git and embeds it via `-ldflags`:
+
+```yaml
+build:
+  desc: build gilterweb with version info
+  cmds:
+    - |
+      VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo dev)
+      COMMIT=$(git rev-parse --short HEAD)
+      BUILT=$(date -Iseconds)
+      go build -ldflags="-X main.Version=${VERSION} \
+        -X main.Commit=${COMMIT} \
+        -X main.Built=${BUILT}" \
+        -o gilterweb ./cmd/gilterweb/
+```
 
 `cover` task example:
 
