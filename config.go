@@ -1,6 +1,7 @@
 package main
 
 import (
+	"compress/gzip"
 	"errors"
 	"fmt"
 	"os"
@@ -13,10 +14,11 @@ import (
 )
 
 type Config struct {
-	Server  ServerConfig   `yaml:"server"`
-	Log     LogConfig      `yaml:"log"`
-	Filters []FilterConfig `yaml:"filters"`
-	Paths   []PathConfig   `yaml:"paths"`
+	Server      ServerConfig      `yaml:"server"`
+	Log         LogConfig         `yaml:"log"`
+	Compression CompressionConfig `yaml:"compression"`
+	Filters     []FilterConfig    `yaml:"filters"`
+	Paths       []PathConfig      `yaml:"paths"`
 }
 
 type ServerConfig struct {
@@ -37,6 +39,14 @@ type LogConfig struct {
 	Format string `yaml:"format"`
 }
 
+type CompressionConfig struct {
+	Enabled    bool     `yaml:"enabled"`
+	MinSize    int      `yaml:"min_size"`
+	Level      int      `yaml:"level"`
+	Types      []string `yaml:"types"`
+	Algorithms []string `yaml:"algorithms"`
+}
+
 type FilterConfig struct {
 	ID        string   `yaml:"id"`
 	Type      string   `yaml:"type"`
@@ -45,10 +55,15 @@ type FilterConfig struct {
 }
 
 type PathConfig struct {
-	Method  string            `yaml:"method"`
-	Path    string            `yaml:"path"`
-	Filter  string            `yaml:"filter"`
-	Headers map[string]string `yaml:"headers"`
+	Method      string                 `yaml:"method"`
+	Path        string                 `yaml:"path"`
+	Filter      string                 `yaml:"filter"`
+	Headers     map[string]string      `yaml:"headers"`
+	Compression *PathCompressionConfig `yaml:"compression"`
+}
+
+type PathCompressionConfig struct {
+	Enabled *bool `yaml:"enabled"`
 }
 
 var supportedFilterTypes = map[string]bool{
@@ -92,6 +107,13 @@ func defaultConfig() Config {
 			MaxFilterOutputSize: 100 * 1024 * 1024,
 		},
 		Log: LogConfig{Level: "info", Format: "json"},
+		Compression: CompressionConfig{
+			Enabled:    false,
+			MinSize:    1024,
+			Level:      5,
+			Types:      []string{"application/json", "text/plain", "text/html"},
+			Algorithms: []string{"gzip"},
+		},
 	}
 }
 
@@ -123,6 +145,18 @@ func (c Config) Validate() error {
 	}
 	if !inSet(c.Log.Format, "json", "text") {
 		return fmt.Errorf("log.format must be json|text")
+	}
+	if c.Compression.MinSize < 0 {
+		return fmt.Errorf("compression.min_size must be >= 0")
+	}
+	if c.Compression.Level < gzip.HuffmanOnly || c.Compression.Level > gzip.BestCompression {
+		return fmt.Errorf("compression.level must be between %d and %d", gzip.HuffmanOnly, gzip.BestCompression)
+	}
+	if c.Compression.Enabled && len(c.Compression.Types) == 0 {
+		return fmt.Errorf("compression.types must not be empty when compression.enabled=true")
+	}
+	if c.Compression.Enabled && !inSet("gzip", c.Compression.Algorithms...) {
+		return fmt.Errorf("compression.algorithms must include gzip when compression.enabled=true")
 	}
 
 	ids := map[string]bool{}

@@ -1,12 +1,14 @@
 package main
 
 import (
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net"
 	"net/http"
 	"os"
@@ -210,23 +212,165 @@ func (a *App) handleRequest(w http.ResponseWriter, r *http.Request) {
 	for k, v := range route.Headers {
 		w.Header().Set(k, v)
 	}
-	writeResult(w, res)
+	writeResultWithCompression(w, r, route, a.cfg.Compression, res)
 }
 
 func writeResult(w http.ResponseWriter, v any) {
+	body, contentType, err := encodeResult(v)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+	_, _ = w.Write(body)
+}
+
+func writeResultWithCompression(
+	w http.ResponseWriter,
+	r *http.Request,
+	route *PathConfig,
+	cfg CompressionConfig,
+	v any,
+) {
+	body, contentType, err := encodeResult(v)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+	if w.Header().Get("Content-Type") == "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+	if !shouldCompressResponse(r, route, cfg, w.Header().Get("Content-Type"), len(body), w.Header()) {
+		_, _ = w.Write(body)
+		return
+	}
+	appendVaryHeader(w.Header(), "Accept-Encoding")
+	w.Header().Set("Content-Encoding", "gzip")
+	w.Header().Del("Content-Length")
+	zw, err := gzip.NewWriterLevel(w, cfg.Level)
+	if err != nil {
+		_, _ = w.Write(body)
+		return
+	}
+	_, _ = zw.Write(body)
+	_ = zw.Close()
+}
+
+func encodeResult(v any) ([]byte, string, error) {
 	switch x := v.(type) {
 	case string:
-		if w.Header().Get("Content-Type") == "" {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		}
-		_, _ = io.WriteString(w, x)
+		return []byte(x), "text/plain; charset=utf-8", nil
 	default:
-		if w.Header().Get("Content-Type") == "" {
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		b, err := json.Marshal(x)
+		if err != nil {
+			return nil, "", err
 		}
-		enc := json.NewEncoder(w)
-		_ = enc.Encode(v)
+		return append(b, '\n'), "application/json; charset=utf-8", nil
 	}
+}
+
+func shouldCompressResponse(
+	r *http.Request,
+	route *PathConfig,
+	cfg CompressionConfig,
+	contentType string,
+	bodySize int,
+	h http.Header,
+) bool {
+	if !isCompressionEnabledForRoute(cfg.Enabled, route) {
+		return false
+	}
+	if bodySize < cfg.MinSize {
+		return false
+	}
+	if h.Get("Content-Encoding") != "" {
+		return false
+	}
+	if r.Header.Get("Range") != "" {
+		return false
+	}
+	if !acceptsGzip(r.Header.Get("Accept-Encoding")) {
+		return false
+	}
+	if !inSet("gzip", cfg.Algorithms...) {
+		return false
+	}
+	if !matchesCompressionType(contentType, cfg.Types) {
+		return false
+	}
+	return true
+}
+
+func isCompressionEnabledForRoute(globalEnabled bool, route *PathConfig) bool {
+	enabled := globalEnabled
+	if route != nil && route.Compression != nil && route.Compression.Enabled != nil {
+		enabled = *route.Compression.Enabled
+	}
+	return enabled
+}
+
+func acceptsGzip(v string) bool {
+	if strings.TrimSpace(v) == "" {
+		return false
+	}
+	for _, raw := range strings.Split(v, ",") {
+		part := strings.TrimSpace(raw)
+		if part == "" {
+			continue
+		}
+		name := part
+		params := ""
+		if i := strings.Index(part, ";"); i >= 0 {
+			name = strings.TrimSpace(part[:i])
+			params = strings.ToLower(part[i+1:])
+		}
+		if !strings.EqualFold(name, "gzip") && name != "*" {
+			continue
+		}
+		if strings.Contains(params, "q=0") || strings.Contains(params, "q=0.") {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func matchesCompressionType(contentType string, allow []string) bool {
+	if len(allow) == 0 {
+		return true
+	}
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil || mediaType == "" {
+		mediaType = strings.TrimSpace(strings.Split(contentType, ";")[0])
+	}
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	for _, a := range allow {
+		p := strings.ToLower(strings.TrimSpace(a))
+		if p == mediaType {
+			return true
+		}
+		if strings.HasSuffix(p, "/*") {
+			prefix := strings.TrimSuffix(p, "*")
+			if strings.HasPrefix(mediaType, prefix) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func appendVaryHeader(h http.Header, v string) {
+	cur := h.Values("Vary")
+	for _, line := range cur {
+		for _, token := range strings.Split(line, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), v) {
+				return
+			}
+		}
+	}
+	h.Add("Vary", v)
 }
 
 func writeError(w http.ResponseWriter, status int, code, requestID string) {

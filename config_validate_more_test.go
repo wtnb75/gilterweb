@@ -52,4 +52,30 @@ func TestValidateServerAndLogBranches(t *testing.T) {
 	if err := cfg.Validate(); err == nil {
 		t.Fatalf("expected log.format error")
 	}
+
+	cfg = defaultConfig()
+	cfg.Compression.MinSize = -1
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected compression.min_size error")
+	}
+
+	cfg = defaultConfig()
+	cfg.Compression.Level = 99
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected compression.level error")
+	}
+
+	cfg = defaultConfig()
+	cfg.Compression.Enabled = true
+	cfg.Compression.Types = nil
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected compression.types error")
+	}
+
+	cfg = defaultConfig()
+	cfg.Compression.Enabled = true
+	cfg.Compression.Algorithms = []string{"br"}
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected compression.algorithms error")
+	}
 }
