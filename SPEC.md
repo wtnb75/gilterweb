@@ -273,6 +273,35 @@ Template context: uses Go `text/template` without HTML escaping. Embedded quotes
 
 Security note: Template expansion applies only to **config-defined string literals** in filter `params`. User input from `.req` (query, headers, body) is never re-evaluated as template code; it is treated as literal values and safely embedded in results.
 
+Template custom functions (minimum set):
+
+- `default <fallback> <value>`: return `fallback` when `value` is empty
+- `coalesce <v1> <v2> ...`: return the first non-empty value
+- `required <message> <value>`: fail template rendering when `value` is empty
+- `dig <obj> <key1> <key2> ...`: safely access nested map/object keys
+- `toJson <value>`: encode value to JSON string
+- `urlquery <value>`: URL query escape
+- `trim <value>`: trim leading/trailing spaces
+- `lower <value>`: convert string to lowercase
+- `join <sep> <list>`: join string list with separator
+- `sha256 <value>`: return SHA-256 hex string
+
+Function safety rules:
+
+- Functions must be deterministic and side-effect free
+- Functions must not perform file I/O, network I/O, or process execution
+- Function errors are treated as template errors and follow the same error disclosure policy
+
+Examples:
+
+```yaml
+type: static
+params:
+  user: "{{coalesce .req.query.user \"guest\"}}"
+  request_id: "{{sha256 (toJson .req.headers)}}"
+  path: "{{urlquery (trim .req.path)}}"
+```
+
 ### `env` — Read Environment Variable
 
 ```yaml

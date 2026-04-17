@@ -87,6 +87,8 @@ formatters:
 - Keep tests in the same package as implementation (`_test` external package only when needed)
 - HTTP handler tests should use `net/http/httptest`
 - Config loading tests should use temporary files from `t.TempDir()`
+- Unit tests must explicitly cover corner cases, not only happy paths (e.g., empty input, malformed config/body, boundary sizes, timeout, missing dependencies, and cycle detection)
+- For each feature, include at least one success case, one failure case, and one boundary/corner case
 
 ## Taskfile Tasks
 
