@@ -14,8 +14,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 type App struct {
@@ -25,7 +26,6 @@ type App struct {
 	cache       *TTLCache
 	filterIndex map[string]FilterConfig
 	logger      *slog.Logger
-	reqSeq      uint64
 }
 
 type CheckRequest struct {
@@ -257,7 +257,10 @@ type requestIDKey struct{}
 func (a *App) withAccessLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		reqID := a.nextRequestID()
+		reqID := strings.TrimSpace(r.Header.Get("X-Request-ID"))
+		if reqID == "" {
+			reqID = a.nextRequestID()
+		}
 		w.Header().Set("X-Request-ID", reqID)
 		r = r.WithContext(context.WithValue(r.Context(), requestIDKey{}, reqID))
 		rw := &responseRecorder{ResponseWriter: w, status: http.StatusOK}
@@ -268,7 +271,7 @@ func (a *App) withAccessLog(next http.Handler) http.Handler {
 			"path", r.URL.Path,
 			"status", rw.status,
 			"remote_addr", r.RemoteAddr,
-			"latency_ms", time.Since(start).Milliseconds(),
+			"latency_us", time.Since(start).Microseconds(),
 		)
 	})
 }
@@ -287,8 +290,7 @@ func (a *App) withRecovery(next http.Handler) http.Handler {
 }
 
 func (a *App) nextRequestID() string {
-	n := atomic.AddUint64(&a.reqSeq, 1)
-	return fmt.Sprintf("req-%d", n)
+	return uuid.NewString()
 }
 
 func requestIDFromContext(ctx context.Context) string {

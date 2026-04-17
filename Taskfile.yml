@@ -1,6 +1,12 @@
 version: "3"
 
 tasks:
+  default:
+    desc: list available tasks
+    cmds:
+      - task -l --sort=alphanumeric
+    silent: true
+
   test:
     desc: run tests with coverage and generate HTML report
     cmds:

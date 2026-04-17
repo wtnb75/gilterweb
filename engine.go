@@ -57,7 +57,7 @@ func (e *Engine) Execute(ctx context.Context, target string, base map[string]any
 				"request_id", requestIDFromContext(ctx),
 				"filter_id", id,
 				"filter_type", f.Type,
-				"duration_ms", time.Since(start).Milliseconds(),
+				"duration_us", time.Since(start).Microseconds(),
 				"error", err,
 			)
 			return nil, fmt.Errorf("filter '%s': %w", id, err)
@@ -67,7 +67,7 @@ func (e *Engine) Execute(ctx context.Context, target string, base map[string]any
 				"request_id", requestIDFromContext(ctx),
 				"filter_id", id,
 				"filter_type", f.Type,
-				"duration_ms", time.Since(start).Milliseconds(),
+				"duration_us", time.Since(start).Microseconds(),
 			)
 			return nil, fmt.Errorf("filter output too large")
 		}
@@ -75,7 +75,7 @@ func (e *Engine) Execute(ctx context.Context, target string, base map[string]any
 			"request_id", requestIDFromContext(ctx),
 			"filter_id", id,
 			"filter_type", f.Type,
-			"duration_ms", time.Since(start).Milliseconds(),
+			"duration_us", time.Since(start).Microseconds(),
 		)
 		resultMap[id] = out
 	}
