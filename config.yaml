@@ -1,0 +1,22 @@
+server:
+  network: tcp
+  addr: ":8888"
+
+filters:
+  - id: A
+    type: http
+    params:
+      method: GET
+      url: https://httpbin.org/ip
+  - id: B
+    type: static
+    params: "hello {{.A.body.origin}}"
+
+log:
+  level: info
+  format: json
+
+paths:
+  - method: GET
+    path: /foo
+    filter: B

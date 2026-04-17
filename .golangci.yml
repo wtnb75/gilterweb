@@ -1,0 +1,15 @@
+version: "2"
+linters:
+  enable:
+    - staticcheck
+    - errcheck
+    - govet
+    - copyloopvar
+    - misspell
+    - durationcheck
+    - predeclared
+    - sloglint
+    - lll
+formatters:
+  enable:
+    - gofmt

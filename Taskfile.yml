@@ -1,0 +1,38 @@
+version: "3"
+
+tasks:
+  test:
+    desc: run tests with coverage and generate HTML report
+    cmds:
+      - go test -v -cover -coverprofile=cover.out ./...
+      - go tool cover -html=cover.out -o cover.html
+
+  lint:
+    desc: fix, format, and lint the codebase
+    cmds:
+      - go fix ./...
+      - go fmt ./...
+      - golangci-lint run
+
+  build:
+    desc: build gilterweb with version info
+    cmds:
+      - |
+        VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo dev)
+        COMMIT=$(git rev-parse --short HEAD)
+        BUILT=$(date -Iseconds)
+        go build -ldflags="-X main.Version=${VERSION} \
+          -X main.Commit=${COMMIT} \
+          -X main.Built=${BUILT}" \
+          -o gilterweb .
+
+  run:
+    desc: run the server with default config
+    cmds:
+      - go run . server
+
+  cover:
+    desc: check that total coverage is >= 90%
+    cmds:
+      - go test -coverprofile=cover.out ./...
+      - go tool cover -func=cover.out | awk '/^total:/{if ($3+0 < 90) {print "Coverage "$3" < 90%"; exit 1}}'
