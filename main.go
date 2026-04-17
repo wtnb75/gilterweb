@@ -126,19 +126,40 @@ func newServerCmd(configPath *string, logLevel *string) *cobra.Command {
 			}
 			ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 			defer stop()
+			hupCh := make(chan os.Signal, 1)
+			signal.Notify(hupCh, syscall.SIGHUP)
+			defer signal.Stop(hupCh)
 
 			errCh := make(chan error, 1)
 			go func() {
 				errCh <- app.Run(ctx)
 			}()
 
-			select {
-			case <-ctx.Done():
-				shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
-				defer cancel()
-				return app.Shutdown(shutdownCtx)
-			case err := <-errCh:
-				return err
+			for {
+				select {
+				case <-ctx.Done():
+					shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
+					defer cancel()
+					return app.Shutdown(shutdownCtx)
+				case err := <-errCh:
+					return err
+				case <-hupCh:
+					nextCfg, err := LoadConfig(*configPath)
+					if err != nil {
+						app.currentLogger().Error("config reload failed", "error", err)
+						continue
+					}
+					if err := applyLogLevelOverride(&nextCfg, *logLevel); err != nil {
+						app.currentLogger().Error("config reload failed", "error", err)
+						continue
+					}
+					if err := app.Reload(nextCfg); err != nil {
+						app.currentLogger().Error("config reload failed", "error", err)
+						continue
+					}
+					cfg = nextCfg
+					app.currentLogger().Info("config reload succeeded")
+				}
 			}
 		},
 	}

@@ -92,13 +92,9 @@ func parseBody(contentType string, body []byte) any {
 	case "application/x-www-form-urlencoded":
 		vals, err := url.ParseQuery(string(body))
 		if err == nil {
-			res := map[string]any{}
+			res := map[string][]string{}
 			for k, v := range vals {
-				arr := make([]any, 0, len(v))
-				for _, e := range v {
-					arr = append(arr, e)
-				}
-				res[k] = arr
+				res[k] = append([]string(nil), v...)
 			}
 			return res
 		}

@@ -36,11 +36,11 @@ func TestParseBodyVariants(t *testing.T) {
 	}
 
 	form := parseBody("application/x-www-form-urlencoded", []byte("a=1&a=2"))
-	fm, ok := form.(map[string]any)
+	fm, ok := form.(map[string][]string)
 	if !ok {
 		t.Fatalf("form parse type = %T", form)
 	}
-	want := []any{"1", "2"}
+	want := []string{"1", "2"}
 	if !reflect.DeepEqual(fm["a"], want) {
 		t.Fatalf("form parse a=%#v", fm["a"])
 	}

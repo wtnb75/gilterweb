@@ -22,6 +22,7 @@ import (
 )
 
 type App struct {
+	mu          sync.RWMutex
 	cfg         Config
 	server      *http.Server
 	engine      *Engine
@@ -64,39 +65,44 @@ func NewApp(cfg Config) (*App, error) {
 }
 
 func (a *App) Run(ctx context.Context) error {
-	a.logger.Info("server starting",
-		"network", a.cfg.Server.Network,
-		"addr", a.cfg.Server.Addr,
-		"unix_socket", a.cfg.Server.UnixSocket)
+	a.mu.RLock()
+	cfg := a.cfg
+	a.mu.RUnlock()
+	logger := a.currentLogger()
+
+	logger.Info("server starting",
+		"network", cfg.Server.Network,
+		"addr", cfg.Server.Addr,
+		"unix_socket", cfg.Server.UnixSocket)
 	go func() {
 		<-ctx.Done()
 	}()
-	if a.cfg.Server.Network == "unix" {
-		ln, err := prepareUnixListener(a.cfg.Server.UnixSocket)
+	if cfg.Server.Network == "unix" {
+		ln, err := prepareUnixListener(cfg.Server.UnixSocket)
 		if err != nil {
-			a.logger.Error("server start failed", "error", err)
+			logger.Error("server start failed", "error", err)
 			return err
 		}
-		if mode, parseErr := strconv.ParseUint(a.cfg.Server.UnixSocketMode, 8, 32); parseErr == nil {
-			_ = os.Chmod(a.cfg.Server.UnixSocket, os.FileMode(mode))
+		if mode, parseErr := strconv.ParseUint(cfg.Server.UnixSocketMode, 8, 32); parseErr == nil {
+			_ = os.Chmod(cfg.Server.UnixSocket, os.FileMode(mode))
 		}
 		defer func() {
-			_ = os.Remove(a.cfg.Server.UnixSocket)
+			_ = os.Remove(cfg.Server.UnixSocket)
 		}()
 		err = a.server.Serve(ln)
 		if errors.Is(err, http.ErrServerClosed) {
-			a.logger.Info("server stopped")
+			logger.Info("server stopped")
 			return nil
 		}
-		a.logger.Error("server serve failed", "error", err)
+		logger.Error("server serve failed", "error", err)
 		return err
 	}
 	err := a.server.ListenAndServe()
 	if errors.Is(err, http.ErrServerClosed) {
-		a.logger.Info("server stopped")
+		logger.Info("server stopped")
 		return nil
 	}
-	a.logger.Error("server listen failed", "error", err)
+	logger.Error("server listen failed", "error", err)
 	return err
 }
 
@@ -119,11 +125,50 @@ func prepareUnixListener(socketPath string) (net.Listener, error) {
 }
 
 func (a *App) Shutdown(ctx context.Context) error {
-	a.logger.Info("server shutting down")
+	a.currentLogger().Info("server shutting down")
 	return a.server.Shutdown(ctx)
 }
 
+func (a *App) Reload(cfg Config) error {
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.cfg.Server != cfg.Server {
+		return fmt.Errorf("config reload failed: server settings are not hot-reloadable")
+	}
+
+	index := map[string]FilterConfig{}
+	for _, f := range cfg.Filters {
+		index[f.ID] = f
+	}
+	a.cfg = cfg
+	a.filterIndex = index
+	a.logger = NewLogger(cfg.Log)
+	a.engine = NewEngine(cfg, index, a.cache, a.logger)
+	return nil
+}
+
+func (a *App) currentLogger() *slog.Logger {
+	a.mu.RLock()
+	logger := a.logger
+	a.mu.RUnlock()
+	if logger == nil {
+		return slog.Default()
+	}
+	return logger
+}
+
 func (a *App) Check(ctx context.Context, in CheckRequest) (any, error) {
+	a.mu.RLock()
+	cfg := a.cfg
+	engine := a.engine
+	a.mu.RUnlock()
+	logger := a.currentLogger()
+
 	body := in.Body
 	if in.BodyFile != "" {
 		b, err := os.ReadFile(in.BodyFile)
@@ -145,24 +190,24 @@ func (a *App) Check(ctx context.Context, in CheckRequest) (any, error) {
 		headers["Content-Type"] = in.ContentType
 	}
 
-	route := matchRoute(a.cfg.Paths, strings.ToUpper(in.Method), in.Path)
+	route := matchRoute(cfg.Paths, strings.ToUpper(in.Method), in.Path)
 	if route == nil {
-		a.logger.Warn("check route not found", "method", in.Method, "path", in.Path)
+		logger.Warn("check route not found", "method", in.Method, "path", in.Path)
 		return nil, errors.New("no matching route")
 	}
 	reqCtx := buildRequestContext(strings.ToUpper(in.Method), in.Path, "", "", "", headers, []byte(body))
 	reqID := a.nextRequestID()
 	ctx = context.WithValue(ctx, requestIDKey{}, reqID)
-	ctx, cancel := context.WithTimeout(ctx, a.cfg.Server.RequestTimeout)
+	ctx, cancel := context.WithTimeout(ctx, cfg.Server.RequestTimeout)
 	defer cancel()
-	res, err := a.engine.Execute(ctx, route.Filter, reqCtx)
+	res, err := engine.Execute(ctx, route.Filter, reqCtx)
 	if err != nil {
-		a.logger.Error("check execution failed",
+		logger.Error("check execution failed",
 			"request_id", reqID, "method", in.Method,
 			"path", in.Path, "filter", route.Filter, "error", err)
 		return nil, err
 	}
-	a.logger.Info("check execution succeeded",
+	logger.Info("check execution succeeded",
 		"request_id", reqID, "method", in.Method,
 		"path", in.Path, "filter", route.Filter)
 	return res, nil
@@ -174,16 +219,22 @@ func (a *App) handleHealthz(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *App) handleRequest(w http.ResponseWriter, r *http.Request) {
+	a.mu.RLock()
+	cfg := a.cfg
+	engine := a.engine
+	a.mu.RUnlock()
+	logger := a.currentLogger()
+
 	reqID := requestIDFromContext(r.Context())
-	route := matchRoute(a.cfg.Paths, r.Method, r.URL.Path)
+	route := matchRoute(cfg.Paths, r.Method, r.URL.Path)
 	if route == nil {
 		writeError(w, http.StatusNotFound, "ROUTE_NOT_FOUND", reqID)
 		return
 	}
 
-	body, tooLarge, err := readRequestBody(r, a.cfg.Server.MaxBodySize)
+	body, tooLarge, err := readRequestBody(r, cfg.Server.MaxBodySize)
 	if err != nil {
-		a.logger.Error("request body read failed", "request_id", reqID, "error", err)
+		logger.Error("request body read failed", "request_id", reqID, "error", err)
 		writeError(w, http.StatusInternalServerError, "FILTER_EXECUTION_FAILED", reqID)
 		return
 	}
@@ -191,28 +242,56 @@ func (a *App) handleRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusRequestEntityTooLarge, "REQUEST_BODY_TOO_LARGE", reqID)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), a.cfg.Server.RequestTimeout)
+	ctx, cancel := context.WithTimeout(r.Context(), cfg.Server.RequestTimeout)
 	defer cancel()
 	reqCtxData := buildRequestContext(
 		r.Method, r.URL.Path, r.URL.RawQuery,
 		r.Host, r.RemoteAddr, flattenHeaders(r.Header), body,
 	)
-	res, err := a.engine.Execute(ctx, route.Filter, reqCtxData)
+	res, err := engine.Execute(ctx, route.Filter, reqCtxData)
 	if err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
-			a.logger.Warn("request timeout", "request_id", reqID, "filter", route.Filter)
+			logger.Warn("request timeout", "request_id", reqID, "filter", route.Filter)
 			writeError(w, http.StatusInternalServerError, "REQUEST_TIMEOUT", reqID)
 			return
 		}
-		a.logger.Error("request execution failed", "request_id", reqID, "filter", route.Filter, "error", err)
+		if errors.Is(err, ErrFilterOutputTooLarge) {
+			logger.Error("request execution failed", "request_id", reqID, "filter", route.Filter, "error", err)
+			writeError(w, http.StatusInternalServerError, "FILTER_OUTPUT_TOO_LARGE", reqID)
+			return
+		}
+		logger.Error("request execution failed", "request_id", reqID, "filter", route.Filter, "error", err)
 		writeError(w, http.StatusInternalServerError, "FILTER_EXECUTION_FAILED", reqID)
 		return
 	}
 
+	applyFilterResponseHeaders(w.Header(), res)
+
 	for k, v := range route.Headers {
 		w.Header().Set(k, v)
 	}
-	writeResultWithCompression(w, r, route, a.cfg.Compression, res)
+	writeResultWithCompression(w, r, route, cfg.Compression, res)
+}
+
+func applyFilterResponseHeaders(h http.Header, v any) {
+	m, ok := v.(map[string]any)
+	if !ok {
+		return
+	}
+	hv, ok := m["headers"]
+	if !ok {
+		return
+	}
+	switch x := hv.(type) {
+	case map[string]string:
+		for k, vv := range x {
+			h.Set(k, vv)
+		}
+	case map[string]any:
+		for k, vv := range x {
+			h.Set(k, fmt.Sprint(vv))
+		}
+	}
 }
 
 func writeResult(w http.ResponseWriter, v any) {
@@ -409,7 +488,7 @@ func (a *App) withAccessLog(next http.Handler) http.Handler {
 		r = r.WithContext(context.WithValue(r.Context(), requestIDKey{}, reqID))
 		rw := &responseRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rw, r)
-		a.logger.Info("access",
+		a.currentLogger().Info("access",
 			"request_id", reqID,
 			"method", r.Method,
 			"path", r.URL.Path,
@@ -425,7 +504,7 @@ func (a *App) withRecovery(next http.Handler) http.Handler {
 		defer func() {
 			if rec := recover(); rec != nil {
 				reqID := requestIDFromContext(r.Context())
-				a.logger.Error("panic recovered", "request_id", reqID, "panic", rec, "stack", string(debug.Stack()))
+				a.currentLogger().Error("panic recovered", "request_id", reqID, "panic", rec, "stack", string(debug.Stack()))
 				writeError(w, http.StatusInternalServerError, "FILTER_EXECUTION_FAILED", reqID)
 			}
 		}()

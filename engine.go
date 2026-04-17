@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"maps"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -29,6 +31,8 @@ type Engine struct {
 	renderFuncs template.FuncMap
 	logger      *slog.Logger
 }
+
+var ErrFilterOutputTooLarge = errors.New("filter output too large")
 
 func NewEngine(cfg Config, filters map[string]FilterConfig, cache *TTLCache, logger *slog.Logger) *Engine {
 	g, _ := BuildDependencyGraph(cfg.Filters)
@@ -69,7 +73,7 @@ func (e *Engine) Execute(ctx context.Context, target string, base map[string]any
 				"filter_type", f.Type,
 				"duration_us", time.Since(start).Microseconds(),
 			)
-			return nil, fmt.Errorf("filter output too large")
+			return nil, fmt.Errorf("%w: %s", ErrFilterOutputTooLarge, id)
 		}
 		e.logger.Info("filter executed",
 			"request_id", requestIDFromContext(ctx),
@@ -206,6 +210,7 @@ func (e *Engine) execHTTPFilter(ctx context.Context, f FilterConfig, data map[st
 	if !ok {
 		return nil, fmt.Errorf("http params must be object")
 	}
+	unixSocket := toString(params["unix_socket"])
 	method := toString(params["method"])
 	if method == "" {
 		method = http.MethodGet
@@ -226,7 +231,17 @@ func (e *Engine) execHTTPFilter(ctx context.Context, f FilterConfig, data map[st
 	for k, v := range toStringMap(params["headers"]) {
 		req.Header.Set(k, v)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := http.DefaultClient
+	if unixSocket != "" {
+		transport := &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, "unix", unixSocket)
+			},
+		}
+		client = &http.Client{Transport: transport}
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}
