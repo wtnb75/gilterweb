@@ -1,0 +1,160 @@
+server:
+  network: tcp
+  addr: ":8888"
+  request_timeout: 10s
+  read_timeout: 10s
+  write_timeout: 10s
+  shutdown_timeout: 5s
+  max_body_size: 1048576
+  max_filter_output_size: 10485760
+
+log:
+  level: info
+  format: json
+
+# Global response compression (gzip)
+compression:
+  enabled: true
+  min_size: 256
+  level: 5
+  types:
+    - application/json
+    - text/plain
+    - text/html
+  algorithms:
+    - gzip
+
+filters:
+  # 1) static: build request summary from request context
+  - id: REQ_SUMMARY
+    type: static
+    params:
+      method: "{{ .req.method }}"
+      path: "{{ .req.path }}"
+      user_agent: '{{ default "unknown" (index .req.headers "User-Agent") }}'
+      request_id: '{{ default "none" (index .req.headers "X-Request-ID") }}'
+
+  # 2) env: read env var with fallback
+  - id: ENV_HOME
+    type: env
+    params:
+      name: HOME
+      default: /tmp
+
+  # 3) exec: run local shell command
+  - id: EXEC_ECHO
+    type: exec
+    params:
+      command:
+        - sh
+        - -c
+        - 'printf ''exec:%s'' "{{ .ENV_HOME }}"'
+      timeout: 2s
+
+  # 4) file: read workspace file as plain text
+  - id: FILE_GOMOD
+    type: file
+    params:
+      path: ./go.mod
+      parse: text
+
+  # 5) base64 encode/decode
+  - id: B64_ENCODE_PATH
+    type: base64
+    params:
+      op: encode
+      input: "{{ .REQ_SUMMARY.path }}"
+
+  - id: B64_DECODE_PATH
+    type: base64
+    params:
+      op: decode
+      input: "{{ .B64_ENCODE_PATH }}"
+
+  # 6) regex find + replace
+  - id: REGEX_FIND
+    type: regex
+    params:
+      input: "{{ .B64_DECODE_PATH }}"
+      pattern: "^/(?P<first>[^/]+)"
+      op: find
+
+  - id: REGEX_REWRITE
+    type: regex
+    params:
+      input: "{{ .B64_DECODE_PATH }}"
+      pattern: "^/"
+      op: replace
+      replace: "path:"
+
+  # 7) jq: parse JSON string and extract fields
+  - id: JQ_SOURCE
+    type: static
+    params: '{"path":"{{ .B64_DECODE_PATH }}","home":"{{ .ENV_HOME }}","ok":true}'
+
+  - id: JQ_SELECT
+    type: jq
+    params:
+      input: "{{ .JQ_SOURCE }}"
+      query: "{path: .path, ok: .ok}"
+
+  # 8) cache: cache result of another filter
+  - id: CACHED_EXEC
+    type: cache
+    params:
+      filter: EXEC_ECHO
+      ttl: 30s
+      key: '{{ .REQ_SUMMARY.path }}:{{ default "/tmp" .ENV_HOME }}'
+
+  # 9) http: call external endpoint (requires outbound network)
+  - id: HTTP_ECHO
+    type: http
+    params:
+      method: POST
+      url: https://httpbin.org/anything
+      headers:
+        Content-Type: application/json
+      body: '{"path":"{{ .req.path }}","from":"gilterweb"}'
+
+  # Final composed response
+  - id: RESPONSE_ALL
+    type: static
+    params:
+      request:
+        method: "{{ .REQ_SUMMARY.method }}"
+        path: "{{ .REQ_SUMMARY.path }}"
+      env_home: "{{ .ENV_HOME }}"
+      exec_stdout: "{{ .CACHED_EXEC.stdout }}"
+      file_preview: "{{ .FILE_GOMOD | trim }}"
+      base64:
+        encoded: "{{ .B64_ENCODE_PATH }}"
+        decoded: "{{ .B64_DECODE_PATH }}"
+      regex:
+        first_segment: "{{ .REGEX_FIND.first }}"
+        rewritten: "{{ .REGEX_REWRITE }}"
+      jq_result: "{{ toJson .JQ_SELECT }}"
+      http_status: "{{ .HTTP_ECHO.status }}"
+      http_raw: "{{ .HTTP_ECHO.raw }}"
+
+paths:
+  # Most features in one request (includes external HTTP filter)
+  - method: GET
+    path: /demo/all
+    filter: RESPONSE_ALL
+
+  # Local-only path (no external HTTP dependency)
+  - method: GET
+    path: /demo/local
+    filter: JQ_SELECT
+
+  # Cache demonstration
+  - method: GET
+    path: /demo/cache
+    filter: CACHED_EXEC
+
+  # Compression override example: disable only for this path
+  - method: GET
+    path: /demo/nocompress
+    filter: RESPONSE_ALL
+    compression:
+      enabled: false

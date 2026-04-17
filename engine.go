@@ -485,8 +485,20 @@ func (e *Engine) execCacheFilter(ctx context.Context, f FilterConfig, data map[s
 	}
 	cacheKey := target + ":" + key
 	if v, ok := e.cache.Get(cacheKey); ok {
+		e.logger.Info("cache hit",
+			"request_id", requestIDFromContext(ctx),
+			"filter_id", f.ID,
+			"target_filter", target,
+			"cache_key", cacheKey,
+		)
 		return v, nil
 	}
+	e.logger.Info("cache miss",
+		"request_id", requestIDFromContext(ctx),
+		"filter_id", f.ID,
+		"target_filter", target,
+		"cache_key", cacheKey,
+	)
 	res, err := e.execFilter(ctx, e.filters[target], data)
 	if err != nil {
 		return nil, err
