@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 )
 
@@ -20,13 +21,7 @@ func TestWalkTemplateRefsReflectAndComplexTemplate(t *testing.T) {
 	deps = inferTemplateDeps([]string{complexTpl})
 	// TemplateNode/WithNode/RangeNode/IfNode 経由で少なくとも C/D/E/F を拾う。
 	for _, k := range []string{"C", "D", "E", "F"} {
-		found := false
-		for _, d := range deps {
-			if d == k {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(deps, k)
 		if !found {
 			t.Fatalf("missing dep %q in %v", k, deps)
 		}

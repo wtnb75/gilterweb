@@ -1,9 +1,31 @@
 package main
 
 import (
+	"io"
+	"os"
 	"strings"
 	"testing"
 )
+
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	orig := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = orig }()
+
+	fn()
+	_ = w.Close()
+	b, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("read stdout: %v", err)
+	}
+	_ = r.Close()
+	return string(b)
+}
 
 func TestValidateCmdAndCheckCmdBranches(t *testing.T) {
 	cfgPath := writeTestConfigFile(t, `server:
@@ -24,8 +46,22 @@ paths:
 
 	logLevel := ""
 	validate := newValidateCmd(&cfgPath, &logLevel)
-	if err := validate.Execute(); err != nil {
-		t.Fatalf("validate execute err: %v", err)
+	out := captureStdout(t, func() {
+		if err := validate.Execute(); err != nil {
+			t.Fatalf("validate execute err: %v", err)
+		}
+	})
+	if !strings.Contains(out, "validation succeeded") {
+		t.Fatalf("validate output missing success: %q", out)
+	}
+	if !strings.Contains(out, "execution plan:") {
+		t.Fatalf("validate output missing plan header: %q", out)
+	}
+	if !strings.Contains(out, "- GET /x -> A") {
+		t.Fatalf("validate output missing path info: %q", out)
+	}
+	if !strings.Contains(out, "filters: A") {
+		t.Fatalf("validate output missing filters list: %q", out)
 	}
 
 	badLevel := "verbose"
@@ -60,6 +96,40 @@ paths:
 	}
 	if !AsExitError(err, &ex) || ex.Code != 1 {
 		t.Fatalf("expected ExitError code 1, got: %#v", err)
+	}
+}
+
+func TestValidateShowsDependencyExpandedFilters(t *testing.T) {
+	cfgPath := writeTestConfigFile(t, `server:
+  network: tcp
+  addr: ":8080"
+filters:
+  - id: A
+    type: static
+    params: "ok"
+  - id: B
+    type: static
+    params: "{{ .A }}-b"
+log:
+  level: info
+  format: json
+paths:
+  - method: GET
+    path: /dep
+    filter: B
+`)
+	logLevel := ""
+	validate := newValidateCmd(&cfgPath, &logLevel)
+	out := captureStdout(t, func() {
+		if err := validate.Execute(); err != nil {
+			t.Fatalf("validate execute err: %v", err)
+		}
+	})
+	if !strings.Contains(out, "- GET /dep -> B") {
+		t.Fatalf("path line missing: %q", out)
+	}
+	if !strings.Contains(out, "filters: A, B") {
+		t.Fatalf("dependency-expanded filter list missing: %q", out)
 	}
 }
 

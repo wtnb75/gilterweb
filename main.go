@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
@@ -78,9 +79,29 @@ func newValidateCmd(configPath *string, logLevel *string) *cobra.Command {
 				return err
 			}
 			fmt.Println("validation succeeded")
+			if err := printValidationExecutionPlan(cfg); err != nil {
+				return err
+			}
 			return nil
 		},
 	}
+}
+
+func printValidationExecutionPlan(cfg Config) error {
+	g, err := BuildDependencyGraph(cfg.Filters)
+	if err != nil {
+		return err
+	}
+	fmt.Println("execution plan:")
+	for _, p := range cfg.Paths {
+		order, err := topoForTarget(g, p.Filter)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("- %s %s -> %s\n", strings.ToUpper(p.Method), p.Path, p.Filter)
+		fmt.Printf("  filters: %s\n", strings.Join(order, ", "))
+	}
+	return nil
 }
 
 func newServerCmd(configPath *string, logLevel *string) *cobra.Command {

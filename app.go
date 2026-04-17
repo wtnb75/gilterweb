@@ -315,16 +315,16 @@ func acceptsGzip(v string) bool {
 	if strings.TrimSpace(v) == "" {
 		return false
 	}
-	for _, raw := range strings.Split(v, ",") {
+	for raw := range strings.SplitSeq(v, ",") {
 		part := strings.TrimSpace(raw)
 		if part == "" {
 			continue
 		}
 		name := part
 		params := ""
-		if i := strings.Index(part, ";"); i >= 0 {
-			name = strings.TrimSpace(part[:i])
-			params = strings.ToLower(part[i+1:])
+		if before, after, ok := strings.Cut(part, ";"); ok {
+			name = strings.TrimSpace(before)
+			params = strings.ToLower(after)
 		}
 		if !strings.EqualFold(name, "gzip") && name != "*" {
 			continue
@@ -364,7 +364,7 @@ func matchesCompressionType(contentType string, allow []string) bool {
 func appendVaryHeader(h http.Header, v string) {
 	cur := h.Values("Vary")
 	for _, line := range cur {
-		for _, token := range strings.Split(line, ",") {
+		for token := range strings.SplitSeq(line, ",") {
 			if strings.EqualFold(strings.TrimSpace(token), v) {
 				return
 			}
