@@ -579,6 +579,7 @@ Request context is available as `.req`:
 ```text
 .req.method
 .req.path
+.req.path_params.{name}
 .req.host
 .req.remote_addr
 .req.query.{key}
@@ -693,13 +694,23 @@ Defaults should be set before `yaml.Unmarshal`.
 Register from `paths` at startup. `method: "*"` matches all methods.
 
 Match policy:
-
 - evaluate top to bottom
 - method exact match or `*`
-- path exact string match (no wildcards, no regex, no path parameters)
-- first match wins
+- supports exact paths and path parameters using `{name}` segments
+- path matching is case-sensitive
+- exact routes are evaluated before parameter routes
+- first match wins within the same category
 
-Path matching is case-sensitive and requires an exact string match. For example, `/foo` matches only `/foo`, not `/foo/`, `/foobar`, or `/foo/bar`.
+Path parameter rules:
+
+- Segment format: `{name}` (example: `/users/{id}`)
+- Parameter names are exposed via `.req.path_params.<name>`
+- Pattern constraints are not supported yet (no `{id:[0-9]+}`)
+
+Matching examples:
+
+- `/users/me` (exact) takes precedence over `/users/{id}`
+- `/foo` matches only `/foo`, not `/foo/`, `/foobar`, or `/foo/bar`
 
 If no route matches, server mode returns `404 Not Found`.
 

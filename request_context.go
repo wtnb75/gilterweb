@@ -37,12 +37,18 @@ func flattenHeaders(h http.Header) map[string]string {
 
 func buildRequestContext(
 	method, path, rawQuery, host, remoteAddr string,
+	pathParams map[string]string,
 	headers map[string]string,
 	body []byte,
 ) map[string]any {
+	pp := map[string]any{}
+	for k, v := range pathParams {
+		pp[k] = v
+	}
 	out := map[string]any{
 		"method":       method,
 		"path":         path,
+		"path_params":  pp,
 		"host":         host,
 		"remote_addr":  remoteAddr,
 		"query":        map[string]any{},
@@ -102,15 +108,79 @@ func parseBody(contentType string, body []byte) any {
 	return string(body)
 }
 
-func matchRoute(paths []PathConfig, method, path string) *PathConfig {
-	for i := range paths {
-		p := &paths[i]
-		if p.Path != path {
+type routeMatch struct {
+	route      *PathConfig
+	pathParams map[string]string
+}
+
+func methodMatches(routeMethod, reqMethod string) bool {
+	return routeMethod == "*" || strings.EqualFold(routeMethod, reqMethod)
+}
+
+func hasPathParamPattern(path string) bool {
+	return strings.Contains(path, "{") && strings.Contains(path, "}")
+}
+
+func isPathParamSegment(seg string) bool {
+	return len(seg) > 2 && strings.HasPrefix(seg, "{") && strings.HasSuffix(seg, "}")
+}
+
+func matchPathPattern(pattern, actual string) (map[string]string, bool) {
+	pp := strings.Split(pattern, "/")
+	ap := strings.Split(actual, "/")
+	if len(pp) != len(ap) {
+		return nil, false
+	}
+	out := map[string]string{}
+	for i := range pp {
+		if isPathParamSegment(pp[i]) {
+			name := strings.TrimSuffix(strings.TrimPrefix(pp[i], "{"), "}")
+			if name == "" {
+				return nil, false
+			}
+			out[name] = ap[i]
 			continue
 		}
-		if p.Method == "*" || strings.EqualFold(p.Method, method) {
-			return p
+		if pp[i] != ap[i] {
+			return nil, false
+		}
+	}
+	return out, true
+}
+
+func matchRouteWithParams(paths []PathConfig, method, path string) *routeMatch {
+	for i := range paths {
+		p := &paths[i]
+		if !methodMatches(p.Method, method) {
+			continue
+		}
+		if hasPathParamPattern(p.Path) {
+			continue
+		}
+		if p.Path == path {
+			return &routeMatch{route: p, pathParams: map[string]string{}}
+		}
+	}
+	for i := range paths {
+		p := &paths[i]
+		if !methodMatches(p.Method, method) {
+			continue
+		}
+		if !hasPathParamPattern(p.Path) {
+			continue
+		}
+		params, ok := matchPathPattern(p.Path, path)
+		if ok {
+			return &routeMatch{route: p, pathParams: params}
 		}
 	}
 	return nil
+}
+
+func matchRoute(paths []PathConfig, method, path string) *PathConfig {
+	m := matchRouteWithParams(paths, method, path)
+	if m == nil {
+		return nil
+	}
+	return m.route
 }

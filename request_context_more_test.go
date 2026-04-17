@@ -54,6 +54,8 @@ func TestMatchRoute(t *testing.T) {
 	paths := []PathConfig{
 		{Method: "POST", Path: "/x", Filter: "A"},
 		{Method: "*", Path: "/y", Filter: "B"},
+		{Method: "GET", Path: "/users/{id}", Filter: "U"},
+		{Method: "GET", Path: "/users/me", Filter: "ME"},
 	}
 	if p := matchRoute(paths, "post", "/x"); p == nil || p.Filter != "A" {
 		t.Fatalf("match exact method failed: %#v", p)
@@ -63,5 +65,27 @@ func TestMatchRoute(t *testing.T) {
 	}
 	if p := matchRoute(paths, "GET", "/z"); p != nil {
 		t.Fatalf("unexpected match: %#v", p)
+	}
+
+	rm := matchRouteWithParams(paths, "GET", "/users/42")
+	if rm == nil || rm.route.Filter != "U" || rm.pathParams["id"] != "42" {
+		t.Fatalf("path param match failed: %#v", rm)
+	}
+	rm = matchRouteWithParams(paths, "GET", "/users/me")
+	if rm == nil || rm.route.Filter != "ME" {
+		t.Fatalf("static route should have precedence: %#v", rm)
+	}
+}
+
+func TestBuildRequestContextPathParams(t *testing.T) {
+	h := map[string]string{"Content-Type": "text/plain"}
+	ctx := buildRequestContext("GET", "/users/42", "", "h", "r", map[string]string{"id": "42"}, h, []byte("ok"))
+	req := ctx["req"].(map[string]any)
+	pp, ok := req["path_params"].(map[string]any)
+	if !ok {
+		t.Fatalf("path_params type = %T", req["path_params"])
+	}
+	if pp["id"] != "42" {
+		t.Fatalf("path_params.id = %#v", pp["id"])
 	}
 }

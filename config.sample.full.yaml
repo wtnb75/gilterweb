@@ -116,6 +116,15 @@ filters:
         Content-Type: application/json
       body: '{"path":"{{ .req.path }}","from":"gilterweb"}'
 
+  # 10) path params: dynamic endpoint variables from URL
+  - id: PATH_PARAM_VIEW
+    type: static
+    params:
+      route: "{{ .req.path }}"
+      user_id: '{{ default "unknown" (index .req.path_params "id") }}'
+      section: '{{ default "none" (index .req.path_params "section") }}'
+      note: "values are from .req.path_params"
+
   # Final composed response
   - id: RESPONSE_ALL
     type: static
@@ -151,6 +160,20 @@ paths:
   - method: GET
     path: /demo/cache
     filter: CACHED_EXEC
+
+  # Path parameter examples
+  - method: GET
+    path: /demo/users/{id}
+    filter: PATH_PARAM_VIEW
+
+  - method: GET
+    path: /demo/users/{id}/{section}
+    filter: PATH_PARAM_VIEW
+
+  # Static route wins over parameterized route
+  - method: GET
+    path: /demo/users/me
+    filter: JQ_SELECT
 
   # Compression override example: disable only for this path
   - method: GET

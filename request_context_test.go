@@ -22,7 +22,7 @@ func TestReadRequestBodyTooLarge(t *testing.T) {
 
 func TestBuildRequestContextJSON(t *testing.T) {
 	h := map[string]string{"Content-Type": "application/json"}
-	ctx := buildRequestContext("POST", "/x", "a=1", "h", "r", h, []byte(`{"name":"alice"}`))
+	ctx := buildRequestContext("POST", "/x", "a=1", "h", "r", map[string]string{}, h, []byte(`{"name":"alice"}`))
 	req := ctx["req"].(map[string]any)
 	body := req["body"].(map[string]any)
 	if body["name"] != "alice" {

@@ -190,12 +190,16 @@ func (a *App) Check(ctx context.Context, in CheckRequest) (any, error) {
 		headers["Content-Type"] = in.ContentType
 	}
 
-	route := matchRoute(cfg.Paths, strings.ToUpper(in.Method), in.Path)
-	if route == nil {
+	rm := matchRouteWithParams(cfg.Paths, strings.ToUpper(in.Method), in.Path)
+	if rm == nil {
 		logger.Warn("check route not found", "method", in.Method, "path", in.Path)
 		return nil, errors.New("no matching route")
 	}
-	reqCtx := buildRequestContext(strings.ToUpper(in.Method), in.Path, "", "", "", headers, []byte(body))
+	route := rm.route
+	reqCtx := buildRequestContext(
+		strings.ToUpper(in.Method), in.Path, "", "", "",
+		rm.pathParams, headers, []byte(body),
+	)
 	reqID := a.nextRequestID()
 	ctx = context.WithValue(ctx, requestIDKey{}, reqID)
 	ctx, cancel := context.WithTimeout(ctx, cfg.Server.RequestTimeout)
@@ -226,11 +230,12 @@ func (a *App) handleRequest(w http.ResponseWriter, r *http.Request) {
 	logger := a.currentLogger()
 
 	reqID := requestIDFromContext(r.Context())
-	route := matchRoute(cfg.Paths, r.Method, r.URL.Path)
-	if route == nil {
+	rm := matchRouteWithParams(cfg.Paths, r.Method, r.URL.Path)
+	if rm == nil {
 		writeError(w, http.StatusNotFound, "ROUTE_NOT_FOUND", reqID)
 		return
 	}
+	route := rm.route
 
 	body, tooLarge, err := readRequestBody(r, cfg.Server.MaxBodySize)
 	if err != nil {
@@ -246,7 +251,7 @@ func (a *App) handleRequest(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	reqCtxData := buildRequestContext(
 		r.Method, r.URL.Path, r.URL.RawQuery,
-		r.Host, r.RemoteAddr, flattenHeaders(r.Header), body,
+		r.Host, r.RemoteAddr, rm.pathParams, flattenHeaders(r.Header), body,
 	)
 	res, err := engine.Execute(ctx, route.Filter, reqCtxData)
 	if err != nil {
