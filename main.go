@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -64,9 +67,13 @@ func newVersionCmd() *cobra.Command {
 }
 
 func newValidateCmd(configPath *string, logLevel *string) *cobra.Command {
-	return &cobra.Command{
-		Use:   "validate",
-		Short: "Validate config",
+	var checkHealthz bool
+	var healthzTimeout time.Duration
+
+	cmd := &cobra.Command{
+		Use:          "validate",
+		Short:        "Validate config",
+		SilenceUsage: true,
 		RunE: func(_ *cobra.Command, _ []string) error {
 			cfg, err := LoadConfig(*configPath)
 			if err != nil {
@@ -78,12 +85,73 @@ func newValidateCmd(configPath *string, logLevel *string) *cobra.Command {
 			if err := cfg.Validate(); err != nil {
 				return err
 			}
-			fmt.Println("validation succeeded")
+			fmt.Println("config validation succeeded")
 			if err := printValidationExecutionPlan(cfg); err != nil {
 				return err
 			}
+			if checkHealthz {
+				if err := checkHealthzEndpoint(cfg, healthzTimeout); err != nil {
+					return err
+				}
+				fmt.Println("healthz check succeeded")
+			}
 			return nil
 		},
+	}
+	cmd.Flags().BoolVar(&checkHealthz, "check-healthz", false,
+		"Check whether /healthz is reachable on configured server.addr")
+	cmd.Flags().DurationVar(&healthzTimeout, "healthz-timeout", 2*time.Second,
+		"Timeout for --check-healthz")
+	return cmd
+}
+
+func checkHealthzEndpoint(cfg Config, timeout time.Duration) error {
+	client, url, err := newHealthzClientAndURL(cfg, timeout)
+	if err != nil {
+		return fmt.Errorf("healthz check failed: %w", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return fmt.Errorf("healthz check failed: %w", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("healthz check failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("healthz check failed: unexpected status %s", resp.Status)
+	}
+	return nil
+}
+
+func newHealthzClientAndURL(cfg Config, timeout time.Duration) (*http.Client, string, error) {
+	transport := &http.Transport{Proxy: nil}
+	client := &http.Client{Timeout: timeout, Transport: transport}
+
+	switch cfg.Server.Network {
+	case "tcp":
+		host, port, err := net.SplitHostPort(cfg.Server.Addr)
+		if err != nil {
+			return nil, "", fmt.Errorf("invalid server.addr for health check: %w", err)
+		}
+		if host == "" || host == "0.0.0.0" || host == "::" {
+			host = "127.0.0.1"
+		}
+		return client, "http://" + net.JoinHostPort(host, port) + "/healthz", nil
+	case "unix":
+		if strings.TrimSpace(cfg.Server.UnixSocket) == "" {
+			return nil, "", fmt.Errorf("server.unix_socket is required when network=unix")
+		}
+		transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", cfg.Server.UnixSocket)
+		}
+		return client, "http://unix/healthz", nil
+	default:
+		return nil, "", fmt.Errorf("--check-healthz requires server.network=tcp|unix")
 	}
 }
 

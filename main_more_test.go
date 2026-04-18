@@ -1,10 +1,17 @@
 package main
 
 import (
+	"context"
 	"io"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func captureStdout(t *testing.T, fn func()) string {
@@ -176,5 +183,195 @@ paths:
 	err = serverRunErr.Execute()
 	if err == nil || !strings.Contains(err.Error(), "listen tcp") {
 		t.Fatalf("expected server run error, got: %v", err)
+	}
+}
+
+func TestValidateCmdCheckHealthzSuccess(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	t.Cleanup(ts.Close)
+
+	u, err := url.Parse(ts.URL)
+	if err != nil {
+		t.Fatalf("parse test server url: %v", err)
+	}
+
+	body := "server:\n" +
+		"  network: tcp\n" +
+		"  addr: \"" + u.Host + "\"\n" +
+		"filters:\n" +
+		"  - id: A\n" +
+		"    type: static\n" +
+		"    params: \"ok\"\n" +
+		"log:\n" +
+		"  level: info\n" +
+		"  format: json\n" +
+		"paths:\n" +
+		"  - method: GET\n" +
+		"    path: /x\n" +
+		"    filter: A\n"
+	cfgPath := writeTestConfigFile(t, body)
+	logLevel := ""
+	validate := newValidateCmd(&cfgPath, &logLevel)
+	validate.SetArgs([]string{"--check-healthz"})
+	out := captureStdout(t, func() {
+		if err := validate.Execute(); err != nil {
+			t.Fatalf("validate with healthz err: %v", err)
+		}
+	})
+	if !strings.Contains(out, "healthz check succeeded") {
+		t.Fatalf("healthz success output missing: %q", out)
+	}
+}
+
+func TestValidateCmdCheckHealthzFailure(t *testing.T) {
+	cfgPath := writeTestConfigFile(t, `server:
+  network: tcp
+  addr: "127.0.0.1:1"
+filters:
+  - id: A
+    type: static
+    params: "ok"
+log:
+  level: info
+  format: json
+paths:
+  - method: GET
+    path: /x
+    filter: A
+`)
+	logLevel := ""
+	validate := newValidateCmd(&cfgPath, &logLevel)
+	validate.SetArgs([]string{"--check-healthz", "--healthz-timeout", "200ms"})
+	err := validate.Execute()
+	if err == nil {
+		t.Fatalf("expected healthz failure")
+	}
+	if !strings.Contains(err.Error(), "healthz check failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateCmdCheckHealthzUnixSuccess(t *testing.T) {
+	sock := "/tmp/gilterweb-healthz-" + strconv.FormatInt(time.Now().UnixNano(), 10) + ".sock"
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatalf("listen unix: %v", err)
+	}
+
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})}
+	go func() {
+		_ = srv.Serve(ln)
+	}()
+	t.Cleanup(func() {
+		_ = srv.Shutdown(context.Background())
+		_ = ln.Close()
+		_ = os.Remove(sock)
+	})
+
+	body := "server:\n" +
+		"  network: unix\n" +
+		"  unix_socket: \"" + sock + "\"\n" +
+		"filters:\n" +
+		"  - id: A\n" +
+		"    type: static\n" +
+		"    params: \"ok\"\n" +
+		"log:\n" +
+		"  level: info\n" +
+		"  format: json\n" +
+		"paths:\n" +
+		"  - method: GET\n" +
+		"    path: /x\n" +
+		"    filter: A\n"
+	cfgPath := writeTestConfigFile(t, body)
+	logLevel := ""
+	validate := newValidateCmd(&cfgPath, &logLevel)
+	validate.SetArgs([]string{"--check-healthz"})
+	out := captureStdout(t, func() {
+		if err := validate.Execute(); err != nil {
+			t.Fatalf("validate unix healthz err: %v", err)
+		}
+	})
+	if !strings.Contains(out, "healthz check succeeded") {
+		t.Fatalf("healthz unix success output missing: %q", out)
+	}
+}
+
+func TestNewHealthzClientAndURLDisablesProxy(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Server.Network = "tcp"
+	cfg.Server.Addr = "127.0.0.1:8080"
+	client, _, err := newHealthzClientAndURL(cfg, 500*time.Millisecond)
+	if err != nil {
+		t.Fatalf("newHealthzClientAndURL err: %v", err)
+	}
+	tr, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("unexpected transport type: %T", client.Transport)
+	}
+	if tr.Proxy != nil {
+		t.Fatalf("proxy must be disabled for check-healthz")
+	}
+}
+
+func TestNewHealthzClientAndURLErrors(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Server.Network = "tcp"
+	cfg.Server.Addr = "bad-addr"
+	if _, _, err := newHealthzClientAndURL(cfg, 500*time.Millisecond); err == nil {
+		t.Fatalf("expected invalid server.addr error")
+	}
+
+	cfg = defaultConfig()
+	cfg.Server.Network = "unix"
+	cfg.Server.UnixSocket = ""
+	if _, _, err := newHealthzClientAndURL(cfg, 500*time.Millisecond); err == nil {
+		t.Fatalf("expected missing unix socket error")
+	}
+
+	cfg = defaultConfig()
+	cfg.Server.Network = "weird"
+	if _, _, err := newHealthzClientAndURL(cfg, 500*time.Millisecond); err == nil {
+		t.Fatalf("expected invalid network error")
+	}
+}
+
+func TestCheckHealthzEndpointStatusFailure(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(ts.Close)
+
+	u, err := url.Parse(ts.URL)
+	if err != nil {
+		t.Fatalf("parse test server url: %v", err)
+	}
+	cfg := defaultConfig()
+	cfg.Server.Network = "tcp"
+	cfg.Server.Addr = u.Host
+
+	err = checkHealthzEndpoint(cfg, 500*time.Millisecond)
+	if err == nil {
+		t.Fatalf("expected status failure")
+	}
+	if !strings.Contains(err.Error(), "unexpected status") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
