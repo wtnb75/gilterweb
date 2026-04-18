@@ -108,7 +108,7 @@ func newValidateCmd(configPath *string, logLevel *string) *cobra.Command {
 func checkHealthzEndpoint(cfg Config, timeout time.Duration) error {
 	client, url, err := newHealthzClientAndURL(cfg, timeout)
 	if err != nil {
-		return err
+		return fmt.Errorf("healthz check failed: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
