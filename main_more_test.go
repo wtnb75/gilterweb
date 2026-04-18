@@ -485,7 +485,9 @@ func TestWriteAndCloseFileWriteError(t *testing.T) {
 		t.Fatal(err)
 	}
 	name := tmp.Name()
-	tmp.Close()
+	if err := tmp.Close(); err != nil {
+		t.Fatal(err)
+	}
 	// 読み取り専用で再オープン
 	f, err := os.OpenFile(name, os.O_RDONLY, 0o400)
 	if err != nil {
