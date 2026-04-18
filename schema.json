@@ -49,13 +49,7 @@
         }
       },
       "required": [
-        "network",
-        "request_timeout",
-        "read_timeout",
-        "write_timeout",
-        "shutdown_timeout",
-        "max_body_size",
-        "max_filter_output_size"
+        "network"
       ],
       "allOf": [
         {
