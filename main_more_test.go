@@ -459,3 +459,40 @@ func TestInitConfigCmdForceOverwriteAndStdout(t *testing.T) {
 		t.Fatalf("stdout output missing schema url: %q", outText)
 	}
 }
+
+func TestWriteConfigFileNonExistentDir(t *testing.T) {
+	// force=false, ディレクトリが存在しない → os.ErrExist 以外のエラーを返す
+	path := filepath.Join(t.TempDir(), "nonexistent-subdir", "config.yaml")
+	err := writeConfigFile(path, []byte("content"), false)
+	if err == nil {
+		t.Fatal("expected error for non-existent directory")
+	}
+}
+
+func TestWriteConfigFileForceDirNotExist(t *testing.T) {
+	// force=true, ディレクトリが存在しない → os.CreateTemp が失敗
+	path := filepath.Join(t.TempDir(), "nonexistent-subdir", "config.yaml")
+	err := writeConfigFile(path, []byte("content"), true)
+	if err == nil {
+		t.Fatal("expected error for non-existent directory in force mode")
+	}
+}
+
+func TestWriteAndCloseFileWriteError(t *testing.T) {
+	// 読み取り専用ファイルに書き込もうとして Write エラーを引き起こす
+	tmp, err := os.CreateTemp(t.TempDir(), "readonly-*.tmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := tmp.Name()
+	tmp.Close()
+	// 読み取り専用で再オープン
+	f, err := os.OpenFile(name, os.O_RDONLY, 0o400)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = writeAndCloseFile(f, []byte("content"))
+	if err == nil {
+		t.Fatal("expected write error on read-only file")
+	}
+}
