@@ -18,10 +18,14 @@
         },
         "addr": {
           "type": "string",
+          "minLength": 1,
+          "pattern": ".*\\S.*",
           "description": "TCP listen address (example: :8080, 127.0.0.1:8080)"
         },
         "unix_socket": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "pattern": ".*\\S.*"
         },
         "unix_socket_mode": {
           "type": "string",
