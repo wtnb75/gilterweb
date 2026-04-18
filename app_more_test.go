@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -82,5 +83,38 @@ func TestWithRecoveryAndRenderResultAndTTLCache(t *testing.T) {
 	time.Sleep(30 * time.Millisecond)
 	if _, ok := c.Get("k"); ok {
 		t.Fatalf("cache entry should expire")
+	}
+}
+
+func TestWithAccessLogHealthzUsesDebug(t *testing.T) {
+	var buf bytes.Buffer
+	app := &App{logger: slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))}
+	h := app.withAccessLog(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/healthz", nil))
+	h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/x", nil))
+
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected at least two log lines, got %q", buf.String())
+	}
+
+	var healthzOK bool
+	var normalOK bool
+	for _, ln := range lines {
+		if strings.Contains(ln, `"path":"/healthz"`) && strings.Contains(ln, `"level":"DEBUG"`) {
+			healthzOK = true
+		}
+		if strings.Contains(ln, `"path":"/x"`) && strings.Contains(ln, `"level":"INFO"`) {
+			normalOK = true
+		}
+	}
+	if !healthzOK {
+		t.Fatalf("missing debug access log for /healthz: %q", buf.String())
+	}
+	if !normalOK {
+		t.Fatalf("missing info access log for normal path: %q", buf.String())
 	}
 }
