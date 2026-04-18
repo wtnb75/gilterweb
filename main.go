@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -23,6 +24,7 @@ var (
 )
 
 const configSchemaURL = "https://raw.githubusercontent.com/wtnb75/gilterweb/refs/heads/main/schema.json"
+const configFileMode = 0o600
 
 func init() {
 	cobra.MousetrapHelpText = ""
@@ -98,15 +100,7 @@ func newInitConfigCmd() *cobra.Command {
 				return nil
 			}
 
-			if !force {
-				if _, err := os.Stat(output); err == nil {
-					return fmt.Errorf("output file already exists: %s (use --force to overwrite)", output)
-				} else if !errors.Is(err, os.ErrNotExist) {
-					return fmt.Errorf("stat output file: %w", err)
-				}
-			}
-
-			if err := os.WriteFile(output, []byte(content), 0o644); err != nil {
+			if err := writeConfigFile(output, []byte(content), force); err != nil {
 				return fmt.Errorf("write initial config: %w", err)
 			}
 			fmt.Printf("wrote initial config: %s\n", output)
@@ -117,6 +111,58 @@ func newInitConfigCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&output, "output", "o", "config.yaml", "Output config file path (use '-' for stdout)")
 	cmd.Flags().BoolVarP(&force, "force", "f", false, "Overwrite output file if it already exists")
 	return cmd
+}
+
+func writeConfigFile(output string, content []byte, force bool) error {
+	if !force {
+		f, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_EXCL, configFileMode)
+		if err != nil {
+			if errors.Is(err, os.ErrExist) {
+				return fmt.Errorf("output file already exists: %s (use --force to overwrite)", output)
+			}
+			return err
+		}
+		return writeAndCloseFile(f, content)
+	}
+
+	dir := filepath.Dir(output)
+	tmp, err := os.CreateTemp(dir, ".gilterweb-config-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		_ = os.Remove(tmpName)
+	}()
+
+	if err := tmp.Chmod(configFileMode); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := writeAndCloseFile(tmp, content); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, output); err != nil {
+		return err
+	}
+	return nil
+}
+
+func writeAndCloseFile(f *os.File, content []byte) (err error) {
+	defer func() {
+		cerr := f.Close()
+		if err == nil && cerr != nil {
+			err = cerr
+		}
+	}()
+
+	if _, err = f.Write(content); err != nil {
+		return err
+	}
+	if err = f.Sync(); err != nil {
+		return err
+	}
+	return nil
 }
 
 func renderInitialConfig(cfg Config) (string, error) {

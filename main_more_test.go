@@ -388,6 +388,13 @@ func TestInitConfigCmdWritesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read generated config: %v", err)
 	}
+	st, err := os.Stat(out)
+	if err != nil {
+		t.Fatalf("stat generated config: %v", err)
+	}
+	if got := st.Mode().Perm(); got != configFileMode {
+		t.Fatalf("unexpected file mode: got=%#o want=%#o", got, configFileMode)
+	}
 	s := string(b)
 	if !strings.HasPrefix(s, "# yaml-language-server: $schema=") {
 		t.Fatalf("schema comment missing: %q", s)
@@ -429,6 +436,13 @@ func TestInitConfigCmdForceOverwriteAndStdout(t *testing.T) {
 	b, err := os.ReadFile(out)
 	if err != nil {
 		t.Fatalf("read generated config: %v", err)
+	}
+	st, err := os.Stat(out)
+	if err != nil {
+		t.Fatalf("stat generated config: %v", err)
+	}
+	if got := st.Mode().Perm(); got != configFileMode {
+		t.Fatalf("unexpected file mode after overwrite: got=%#o want=%#o", got, configFileMode)
 	}
 	if !strings.Contains(string(b), configSchemaURL) {
 		t.Fatalf("schema url missing after overwrite")
