@@ -9,11 +9,98 @@ import (
 
 func TestTemplateFuncMapHasCoreFunctions(t *testing.T) {
 	fm := templateFuncMap()
-	keys := []string{"default", "coalesce", "required", "dig", "toJson", "urlquery", "sha256"}
+	keys := []string{
+		"default", "coalesce", "required", "dig", "toJson", "urlquery", "trim",
+		"trimSpace", "trimPrefix", "trimSuffix", "removePrefix", "removeSuffix",
+		"split", "indent", "contains", "hasPrefix", "hasSuffix", "sha256",
+	}
 	for _, k := range keys {
 		if _, ok := fm[k]; !ok {
 			t.Fatalf("missing function %q", k)
 		}
+	}
+}
+
+func TestTplTrimFamily(t *testing.T) {
+	if got := tplTrim("/", "//a/b//"); got != "a/b" {
+		t.Fatalf("trim = %q", got)
+	}
+	if got := tplTrimSpace("  a b  "); got != "a b" {
+		t.Fatalf("trimSpace = %q", got)
+	}
+	if got := tplTrimPrefix("/", "///a/b"); got != "a/b" {
+		t.Fatalf("trimPrefix = %q", got)
+	}
+	if got := tplTrimSuffix("/", "a/b///"); got != "a/b" {
+		t.Fatalf("trimSuffix = %q", got)
+	}
+}
+
+func TestTplRemovePrefixSuffix(t *testing.T) {
+	if got := tplRemovePrefix("ab", "ababa"); got != "aba" {
+		t.Fatalf("removePrefix = %q", got)
+	}
+	if got := tplRemoveSuffix("ab", "ababa"); got != "ababa" {
+		t.Fatalf("removeSuffix = %q", got)
+	}
+	if got := tplRemovePrefix("xy", "ababa"); got != "ababa" {
+		t.Fatalf("removePrefix unchanged = %q", got)
+	}
+	if got := tplRemoveSuffix("xy", "ababa"); got != "ababa" {
+		t.Fatalf("removeSuffix unchanged = %q", got)
+	}
+}
+
+func TestTplSplit(t *testing.T) {
+	got := tplSplit("/", "a/b/c")
+	want := []string{"a", "b", "c"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("split = %#v want %#v", got, want)
+	}
+}
+
+func TestTplIndent(t *testing.T) {
+	if got := tplIndent(2, "a\nb"); got != "  a\n  b" {
+		t.Fatalf("indent multiline = %q", got)
+	}
+	if got := tplIndent(0, "a\nb"); got != "a\nb" {
+		t.Fatalf("indent width 0 = %q", got)
+	}
+	if got := tplIndent(-1, "x"); got != "x" {
+		t.Fatalf("indent negative = %q", got)
+	}
+}
+
+func TestTplContains(t *testing.T) {
+	if !tplContains("hello world", "hello") {
+		t.Fatalf("contains should match substring")
+	}
+	if tplContains("hello world", "bye") {
+		t.Fatalf("contains should not match missing substring")
+	}
+	if !tplContains([]string{"hello", "world"}, "hello") {
+		t.Fatalf("contains should match element in []string")
+	}
+	if tplContains([]int{1, 2, 3}, 9) {
+		t.Fatalf("contains should not match absent element")
+	}
+	if !tplContains([]int{1, 2, 3}, 2) {
+		t.Fatalf("contains should match present element")
+	}
+}
+
+func TestTplHasPrefixHasSuffix(t *testing.T) {
+	if !tplHasPrefix("hello", "he") {
+		t.Fatalf("hasPrefix should match")
+	}
+	if tplHasPrefix("hello", "ll") {
+		t.Fatalf("hasPrefix should not match")
+	}
+	if !tplHasSuffix("hello", "lo") {
+		t.Fatalf("hasSuffix should match")
+	}
+	if tplHasSuffix("hello", "he") {
+		t.Fatalf("hasSuffix should not match")
 	}
 }
 

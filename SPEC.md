@@ -281,7 +281,12 @@ Template custom functions (minimum set):
 - `dig <obj> <key1> <key2> ...`: safely access nested map/object keys
 - `toJson <value>`: encode value to JSON string
 - `urlquery <value>`: URL query escape
-- `trim <value>`: trim leading/trailing spaces
+- `trim <cutset> <value>`: trim leading/trailing runes in `cutset`
+- `trimSpace <value>`: trim leading/trailing spaces
+- `trimPrefix <cutset> <value>`: trim leading runes in `cutset`
+- `trimSuffix <cutset> <value>`: trim trailing runes in `cutset`
+- `removePrefix <prefix> <value>`: remove exact prefix string once
+- `removeSuffix <suffix> <value>`: remove exact suffix string once
 - `lower <value>`: convert string to lowercase
 - `join <sep> <list>`: join string list with separator
 - `sha256 <value>`: return SHA-256 hex string
@@ -299,7 +304,7 @@ type: static
 params:
   user: "{{coalesce .req.query.user \"guest\"}}"
   request_id: "{{sha256 (toJson .req.headers)}}"
-  path: "{{urlquery (trim .req.path)}}"
+  path: "{{urlquery (trimSpace .req.path)}}"
 ```
 
 ### `env` — Read Environment Variable
