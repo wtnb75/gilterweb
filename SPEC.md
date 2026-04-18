@@ -287,8 +287,13 @@ Template custom functions (minimum set):
 - `trimSuffix <cutset> <value>`: trim trailing runes in `cutset`
 - `removePrefix <prefix> <value>`: remove exact prefix string once
 - `removeSuffix <suffix> <value>`: remove exact suffix string once
+- `contains <substr> <value>`: report whether `value` contains `substr`
+- `hasPrefix <prefix> <value>`: report whether `value` starts with `prefix`
+- `hasSuffix <suffix> <value>`: report whether `value` ends with `suffix`
 - `lower <value>`: convert string to lowercase
+- `split <sep> <value>`: split string by separator into a list
 - `join <sep> <list>`: join string list with separator
+- `indent <spaces> <value>`: indent each line in `value` by `spaces` spaces
 - `sha256 <value>`: return SHA-256 hex string
 
 Function safety rules:
