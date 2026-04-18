@@ -1,4 +1,4 @@
-name: update go dependencies
+name: update go.mod
 
 on:
   workflow_dispatch:
@@ -11,10 +11,10 @@ jobs:
   update-deps:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: setup go
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version: stable
           cache: true
@@ -39,7 +39,7 @@ jobs:
 
       - name: create pull request
         if: steps.changes.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@v8
         with:
           commit-message: "chore(deps): update go dependencies"
           title: "chore(deps): update go dependencies"
