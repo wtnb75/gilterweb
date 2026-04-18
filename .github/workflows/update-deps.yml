@@ -1,0 +1,55 @@
+name: update go dependencies
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-deps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: setup go
+        uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+
+      - name: update dependencies
+        run: |
+          go get -u ./...
+          go mod tidy
+
+      - name: detect go module changes
+        id: changes
+        run: |
+          if git diff --quiet -- go.mod go.sum; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: run unit tests
+        if: steps.changes.outputs.changed == 'true'
+        run: go test -v ./...
+
+      - name: create pull request
+        if: steps.changes.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          commit-message: "chore(deps): update go dependencies"
+          title: "chore(deps): update go dependencies"
+          body: |
+            Automated dependency update:
+            - ran `go get -u ./...`
+            - ran `go mod tidy`
+            - ran unit tests (`go test -v ./...`)
+          branch: chore/auto-update-go-deps
+          delete-branch: true
+          add-paths: |
+            go.mod
+            go.sum
