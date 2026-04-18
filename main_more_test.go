@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func captureStdout(t *testing.T, fn func()) string {
@@ -251,5 +255,73 @@ paths:
 	}
 	if !strings.Contains(err.Error(), "healthz check failed") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateCmdCheckHealthzUnixSuccess(t *testing.T) {
+	sock := "/tmp/gilterweb-healthz-" + strconv.FormatInt(time.Now().UnixNano(), 10) + ".sock"
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatalf("listen unix: %v", err)
+	}
+
+	srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})}
+	go func() {
+		_ = srv.Serve(ln)
+	}()
+	t.Cleanup(func() {
+		_ = srv.Shutdown(context.Background())
+		_ = os.Remove(sock)
+	})
+
+	body := "server:\n" +
+		"  network: unix\n" +
+		"  unix_socket: \"" + sock + "\"\n" +
+		"filters:\n" +
+		"  - id: A\n" +
+		"    type: static\n" +
+		"    params: \"ok\"\n" +
+		"log:\n" +
+		"  level: info\n" +
+		"  format: json\n" +
+		"paths:\n" +
+		"  - method: GET\n" +
+		"    path: /x\n" +
+		"    filter: A\n"
+	cfgPath := writeTestConfigFile(t, body)
+	logLevel := ""
+	validate := newValidateCmd(&cfgPath, &logLevel)
+	validate.SetArgs([]string{"--check-healthz"})
+	out := captureStdout(t, func() {
+		if err := validate.Execute(); err != nil {
+			t.Fatalf("validate unix healthz err: %v", err)
+		}
+	})
+	if !strings.Contains(out, "healthz check succeeded") {
+		t.Fatalf("healthz unix success output missing: %q", out)
+	}
+}
+
+func TestNewHealthzClientAndURLDisablesProxy(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Server.Network = "tcp"
+	cfg.Server.Addr = "127.0.0.1:8080"
+	client, _, err := newHealthzClientAndURL(cfg, 500*time.Millisecond)
+	if err != nil {
+		t.Fatalf("newHealthzClientAndURL err: %v", err)
+	}
+	tr, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("unexpected transport type: %T", client.Transport)
+	}
+	if tr.Proxy != nil {
+		t.Fatalf("proxy must be disabled for check-healthz")
 	}
 }

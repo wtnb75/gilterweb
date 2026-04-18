@@ -106,17 +106,10 @@ func newValidateCmd(configPath *string, logLevel *string) *cobra.Command {
 }
 
 func checkHealthzEndpoint(cfg Config, timeout time.Duration) error {
-	if cfg.Server.Network != "tcp" {
-		return fmt.Errorf("--check-healthz requires server.network=tcp")
-	}
-	host, port, err := net.SplitHostPort(cfg.Server.Addr)
+	client, url, err := newHealthzClientAndURL(cfg, timeout)
 	if err != nil {
-		return fmt.Errorf("invalid server.addr for health check: %w", err)
+		return err
 	}
-	if host == "" || host == "0.0.0.0" || host == "::" {
-		host = "127.0.0.1"
-	}
-	url := "http://" + net.JoinHostPort(host, port) + "/healthz"
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -124,7 +117,7 @@ func checkHealthzEndpoint(cfg Config, timeout time.Duration) error {
 	if err != nil {
 		return fmt.Errorf("healthz check failed: %w", err)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("healthz check failed: %w", err)
 	}
@@ -133,6 +126,33 @@ func checkHealthzEndpoint(cfg Config, timeout time.Duration) error {
 		return fmt.Errorf("healthz check failed: unexpected status %s", resp.Status)
 	}
 	return nil
+}
+
+func newHealthzClientAndURL(cfg Config, timeout time.Duration) (*http.Client, string, error) {
+	transport := &http.Transport{Proxy: nil}
+	client := &http.Client{Timeout: timeout, Transport: transport}
+
+	switch cfg.Server.Network {
+	case "tcp":
+		host, port, err := net.SplitHostPort(cfg.Server.Addr)
+		if err != nil {
+			return nil, "", fmt.Errorf("invalid server.addr for health check: %w", err)
+		}
+		if host == "" || host == "0.0.0.0" || host == "::" {
+			host = "127.0.0.1"
+		}
+		return client, "http://" + net.JoinHostPort(host, port) + "/healthz", nil
+	case "unix":
+		if strings.TrimSpace(cfg.Server.UnixSocket) == "" {
+			return nil, "", fmt.Errorf("server.unix_socket is required when network=unix")
+		}
+		transport.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+			return (&net.Dialer{}).DialContext(ctx, "unix", cfg.Server.UnixSocket)
+		}
+		return client, "http://unix/healthz", nil
+	default:
+		return nil, "", fmt.Errorf("--check-healthz requires server.network=tcp|unix")
+	}
 }
 
 func printValidationExecutionPlan(cfg Config) error {
