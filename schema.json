@@ -1,0 +1,243 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/wtnb75/gilterweb/refs/heads/main/schema.json",
+  "title": "gilterweb config",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "network": {
+          "type": "string",
+          "enum": [
+            "tcp",
+            "unix"
+          ]
+        },
+        "addr": {
+          "type": "string",
+          "description": "TCP listen address (example: :8080, 127.0.0.1:8080)"
+        },
+        "unix_socket": {
+          "type": "string"
+        },
+        "unix_socket_mode": {
+          "type": "string",
+          "pattern": "^[0-7]{4}$"
+        },
+        "request_timeout": {
+          "$ref": "#/$defs/duration"
+        },
+        "read_timeout": {
+          "$ref": "#/$defs/duration"
+        },
+        "write_timeout": {
+          "$ref": "#/$defs/duration"
+        },
+        "shutdown_timeout": {
+          "$ref": "#/$defs/duration"
+        },
+        "max_body_size": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_filter_output_size": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "network",
+        "request_timeout",
+        "read_timeout",
+        "write_timeout",
+        "shutdown_timeout",
+        "max_body_size",
+        "max_filter_output_size"
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "network": {
+                "const": "tcp"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "addr"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "network": {
+                "const": "unix"
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "unix_socket"
+            ]
+          }
+        }
+      ]
+    },
+    "log": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ]
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "json",
+            "text"
+          ]
+        }
+      },
+      "required": [
+        "level",
+        "format"
+      ]
+    },
+    "compression": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "min_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "level": {
+          "type": "integer",
+          "minimum": -2,
+          "maximum": 9
+        },
+        "types": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "algorithms": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "gzip"
+            ]
+          }
+        }
+      }
+    },
+    "filters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "http",
+              "static",
+              "env",
+              "exec",
+              "file",
+              "jq",
+              "base64",
+              "regex",
+              "cache"
+            ]
+          },
+          "depends_on": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "params": {}
+        },
+        "required": [
+          "id",
+          "type"
+        ]
+      }
+    },
+    "paths": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "method": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "filter": {
+            "type": "string",
+            "minLength": 1
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "compression": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "required": [
+          "method",
+          "path",
+          "filter"
+        ]
+      }
+    }
+  },
+  "required": [
+    "server",
+    "log",
+    "filters",
+    "paths"
+  ],
+  "$defs": {
+    "duration": {
+      "description": "Go duration string (examples: 500ms, 10s, 2m)",
+      "type": "string",
+      "pattern": "^[0-9]+(ns|us|µs|ms|s|m|h)$"
+    }
+  }
+}
