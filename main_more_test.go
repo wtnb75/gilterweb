@@ -2,6 +2,9 @@ package main
 
 import (
 	"io"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"strings"
 	"testing"
@@ -176,5 +179,77 @@ paths:
 	err = serverRunErr.Execute()
 	if err == nil || !strings.Contains(err.Error(), "listen tcp") {
 		t.Fatalf("expected server run error, got: %v", err)
+	}
+}
+
+func TestValidateCmdCheckHealthzSuccess(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}))
+	t.Cleanup(ts.Close)
+
+	u, err := url.Parse(ts.URL)
+	if err != nil {
+		t.Fatalf("parse test server url: %v", err)
+	}
+
+	body := "server:\n" +
+		"  network: tcp\n" +
+		"  addr: \"" + u.Host + "\"\n" +
+		"filters:\n" +
+		"  - id: A\n" +
+		"    type: static\n" +
+		"    params: \"ok\"\n" +
+		"log:\n" +
+		"  level: info\n" +
+		"  format: json\n" +
+		"paths:\n" +
+		"  - method: GET\n" +
+		"    path: /x\n" +
+		"    filter: A\n"
+	cfgPath := writeTestConfigFile(t, body)
+	logLevel := ""
+	validate := newValidateCmd(&cfgPath, &logLevel)
+	validate.SetArgs([]string{"--check-healthz"})
+	out := captureStdout(t, func() {
+		if err := validate.Execute(); err != nil {
+			t.Fatalf("validate with healthz err: %v", err)
+		}
+	})
+	if !strings.Contains(out, "healthz check succeeded") {
+		t.Fatalf("healthz success output missing: %q", out)
+	}
+}
+
+func TestValidateCmdCheckHealthzFailure(t *testing.T) {
+	cfgPath := writeTestConfigFile(t, `server:
+  network: tcp
+  addr: "127.0.0.1:1"
+filters:
+  - id: A
+    type: static
+    params: "ok"
+log:
+  level: info
+  format: json
+paths:
+  - method: GET
+    path: /x
+    filter: A
+`)
+	logLevel := ""
+	validate := newValidateCmd(&cfgPath, &logLevel)
+	validate.SetArgs([]string{"--check-healthz", "--healthz-timeout", "200ms"})
+	err := validate.Execute()
+	if err == nil {
+		t.Fatalf("expected healthz failure")
+	}
+	if !strings.Contains(err.Error(), "healthz check failed") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
