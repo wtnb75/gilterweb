@@ -235,9 +235,9 @@
   ],
   "$defs": {
     "duration": {
-      "description": "Go duration string (examples: 500ms, 10s, 2m)",
+      "description": "Go duration string (examples: 500ms, 10s, 2m, 1h30m, 1.5s, -250ms, 0)",
       "type": "string",
-      "pattern": "^[0-9]+(ns|us|µs|ms|s|m|h)$"
+      "pattern": "^[-+]?(?:0|(?:([0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
     }
   }
 }
