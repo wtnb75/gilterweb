@@ -143,7 +143,35 @@
             ]
           }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "enabled": {
+                "const": true
+              }
+            },
+            "required": [
+              "enabled"
+            ]
+          },
+          "then": {
+            "required": [
+              "types",
+              "algorithms"
+            ],
+            "properties": {
+              "types": {
+                "minItems": 1
+              },
+              "algorithms": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
     },
     "filters": {
       "type": "array",
