@@ -52,6 +52,7 @@ Commands:
 - `server`: Start HTTP server
 - `check`: Evaluate one request from CLI
 - `validate`: Validate config and print execution plan
+- `init-config`: Generate an initial config file with schema header
 - `version`: Print version info
 
 Examples:
@@ -65,6 +66,9 @@ go run . server --config config.sample.full.yaml --addr :8888
 
 # dry-run one request through filter graph
 go run . check --config config.sample.full.yaml --method GET --path /demo/local
+
+# generate initial config file with schema comment
+go run . init-config --output config.yaml
 ```
 
 ## Path Parameters

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -58,7 +59,7 @@ paths:
 			t.Fatalf("validate execute err: %v", err)
 		}
 	})
-	if !strings.Contains(out, "validation succeeded") {
+	if !strings.Contains(out, "config validation succeeded") {
 		t.Fatalf("validate output missing success: %q", out)
 	}
 	if !strings.Contains(out, "execution plan:") {
@@ -373,5 +374,127 @@ func TestCheckHealthzEndpointStatusFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unexpected status") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestInitConfigCmdWritesFile(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "config.yaml")
+	cmd := newInitConfigCmd()
+	cmd.SetArgs([]string{"--output", out})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("init-config err: %v", err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read generated config: %v", err)
+	}
+	st, err := os.Stat(out)
+	if err != nil {
+		t.Fatalf("stat generated config: %v", err)
+	}
+	if got := st.Mode().Perm(); got != configFileMode {
+		t.Fatalf("unexpected file mode: got=%#o want=%#o", got, configFileMode)
+	}
+	s := string(b)
+	if !strings.HasPrefix(s, "# yaml-language-server: $schema=") {
+		t.Fatalf("schema comment missing: %q", s)
+	}
+	if !strings.Contains(s, configSchemaURL) {
+		t.Fatalf("schema url missing: %q", s)
+	}
+	if !strings.Contains(s, "server:") || !strings.Contains(s, "id: HELLO") {
+		t.Fatalf("generated config content is unexpected: %q", s)
+	}
+	if !strings.Contains(s, "path: /hello") {
+		t.Fatalf("generated config content is unexpected: %q", s)
+	}
+}
+
+func TestInitConfigCmdRefusesOverwriteWithoutForce(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(out, []byte("stale\n"), 0o644); err != nil {
+		t.Fatalf("write stale file: %v", err)
+	}
+	cmd := newInitConfigCmd()
+	cmd.SetArgs([]string{"--output", out})
+	if err := cmd.Execute(); err == nil {
+		t.Fatalf("expected overwrite refusal")
+	}
+}
+
+func TestInitConfigCmdForceOverwriteAndStdout(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(out, []byte("stale\n"), 0o644); err != nil {
+		t.Fatalf("write stale file: %v", err)
+	}
+
+	cmd := newInitConfigCmd()
+	cmd.SetArgs([]string{"--output", out, "--force"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("force overwrite err: %v", err)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("read generated config: %v", err)
+	}
+	st, err := os.Stat(out)
+	if err != nil {
+		t.Fatalf("stat generated config: %v", err)
+	}
+	if got := st.Mode().Perm(); got != configFileMode {
+		t.Fatalf("unexpected file mode after overwrite: got=%#o want=%#o", got, configFileMode)
+	}
+	if !strings.Contains(string(b), configSchemaURL) {
+		t.Fatalf("schema url missing after overwrite")
+	}
+
+	stdoutCmd := newInitConfigCmd()
+	stdoutCmd.SetArgs([]string{"--output", "-"})
+	outText := captureStdout(t, func() {
+		if err := stdoutCmd.Execute(); err != nil {
+			t.Fatalf("stdout output err: %v", err)
+		}
+	})
+	if !strings.Contains(outText, configSchemaURL) {
+		t.Fatalf("stdout output missing schema url: %q", outText)
+	}
+}
+
+func TestWriteConfigFileNonExistentDir(t *testing.T) {
+	// force=false, ディレクトリが存在しない → os.ErrExist 以外のエラーを返す
+	path := filepath.Join(t.TempDir(), "nonexistent-subdir", "config.yaml")
+	err := writeConfigFile(path, []byte("content"), false)
+	if err == nil {
+		t.Fatal("expected error for non-existent directory")
+	}
+}
+
+func TestWriteConfigFileForceDirNotExist(t *testing.T) {
+	// force=true, ディレクトリが存在しない → os.CreateTemp が失敗
+	path := filepath.Join(t.TempDir(), "nonexistent-subdir", "config.yaml")
+	err := writeConfigFile(path, []byte("content"), true)
+	if err == nil {
+		t.Fatal("expected error for non-existent directory in force mode")
+	}
+}
+
+func TestWriteAndCloseFileWriteError(t *testing.T) {
+	// 読み取り専用ファイルに書き込もうとして Write エラーを引き起こす
+	tmp, err := os.CreateTemp(t.TempDir(), "readonly-*.tmp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// 読み取り専用で再オープン
+	f, err := os.OpenFile(name, os.O_RDONLY, 0o400)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = writeAndCloseFile(f, []byte("content"))
+	if err == nil {
+		t.Fatal("expected write error on read-only file")
 	}
 }

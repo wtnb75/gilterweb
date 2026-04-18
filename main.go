@@ -2,16 +2,19 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -19,6 +22,9 @@ var (
 	Commit  = "none"
 	Built   = "unknown"
 )
+
+const configSchemaURL = "https://raw.githubusercontent.com/wtnb75/gilterweb/refs/heads/main/schema.json"
+const configFileMode = 0o600
 
 func init() {
 	cobra.MousetrapHelpText = ""
@@ -51,6 +57,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newServerCmd(&configPath, &logLevel))
 	root.AddCommand(newCheckCmd(&configPath, &logLevel))
 	root.AddCommand(newValidateCmd(&configPath, &logLevel))
+	root.AddCommand(newInitConfigCmd())
 	root.AddCommand(newVersionCmd())
 
 	return root
@@ -64,6 +71,106 @@ func newVersionCmd() *cobra.Command {
 			fmt.Printf("gilterweb version %s (commit: %s, built: %s)\n", Version, Commit, Built)
 		},
 	}
+}
+
+func newInitConfigCmd() *cobra.Command {
+	var output string
+	var force bool
+
+	cmd := &cobra.Command{
+		Use:          "init-config",
+		Short:        "Generate initial config file",
+		SilenceUsage: true,
+		RunE: func(_ *cobra.Command, _ []string) error {
+			cfg := defaultConfig()
+			cfg.Filters = []FilterConfig{
+				{ID: "HELLO", Type: "static", Params: "hello"},
+			}
+			cfg.Paths = []PathConfig{
+				{Method: "GET", Path: "/hello", Filter: "HELLO"},
+			}
+
+			content, err := renderInitialConfig(cfg)
+			if err != nil {
+				return err
+			}
+
+			if output == "-" {
+				fmt.Print(content)
+				return nil
+			}
+
+			if err := writeConfigFile(output, []byte(content), force); err != nil {
+				return fmt.Errorf("write initial config: %w", err)
+			}
+			fmt.Printf("wrote initial config: %s\n", output)
+			return nil
+		},
+	}
+
+	cmd.Flags().StringVarP(&output, "output", "o", "config.yaml", "Output config file path (use '-' for stdout)")
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "Overwrite output file if it already exists")
+	return cmd
+}
+
+func writeConfigFile(output string, content []byte, force bool) error {
+	if !force {
+		f, err := os.OpenFile(output, os.O_WRONLY|os.O_CREATE|os.O_EXCL, configFileMode)
+		if err != nil {
+			if errors.Is(err, os.ErrExist) {
+				return fmt.Errorf("output file already exists: %s (use --force to overwrite)", output)
+			}
+			return err
+		}
+		return writeAndCloseFile(f, content)
+	}
+
+	dir := filepath.Dir(output)
+	tmp, err := os.CreateTemp(dir, ".gilterweb-config-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		_ = os.Remove(tmpName)
+	}()
+
+	if err := tmp.Chmod(configFileMode); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := writeAndCloseFile(tmp, content); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, output); err != nil {
+		return err
+	}
+	return nil
+}
+
+func writeAndCloseFile(f *os.File, content []byte) (err error) {
+	defer func() {
+		cerr := f.Close()
+		if err == nil && cerr != nil {
+			err = cerr
+		}
+	}()
+
+	if _, err = f.Write(content); err != nil {
+		return err
+	}
+	if err = f.Sync(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func renderInitialConfig(cfg Config) (string, error) {
+	b, err := yaml.Marshal(cfg)
+	if err != nil {
+		return "", fmt.Errorf("render initial config: %w", err)
+	}
+	return "# yaml-language-server: $schema=" + configSchemaURL + "\n\n" + string(b), nil
 }
 
 func newValidateCmd(configPath *string, logLevel *string) *cobra.Command {
