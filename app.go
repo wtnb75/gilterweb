@@ -493,7 +493,12 @@ func (a *App) withAccessLog(next http.Handler) http.Handler {
 		r = r.WithContext(context.WithValue(r.Context(), requestIDKey{}, reqID))
 		rw := &responseRecorder{ResponseWriter: w, status: http.StatusOK}
 		next.ServeHTTP(rw, r)
-		a.currentLogger().Info("access",
+		logger := a.currentLogger()
+		logFn := logger.Info
+		if r.URL.Path == "/healthz" {
+			logFn = logger.Debug
+		}
+		logFn("access",
 			"request_id", reqID,
 			"method", r.Method,
 			"path", r.URL.Path,
