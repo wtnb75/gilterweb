@@ -75,3 +75,14 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           IMAGE_TAG: ${{ env.IMAGE_TAG }}
+
+      - name: push images
+        if: ${{ github.ref_type == 'branch' }}
+        run: |
+          docker push ghcr.io/${{ github.repository }}:${{ env.IMAGE_TAG }}-arm64
+          docker push ghcr.io/${{ github.repository }}:${{ env.IMAGE_TAG }}-amd64
+          docker manifest create \
+            ghcr.io/${{ github.repository }}:${{ env.IMAGE_TAG }} \
+            ghcr.io/${{ github.repository }}:${{ env.IMAGE_TAG }}-arm64 \
+            ghcr.io/${{ github.repository }}:${{ env.IMAGE_TAG }}-amd64
+          docker manifest push ghcr.io/${{ github.repository }}:${{ env.IMAGE_TAG }}
