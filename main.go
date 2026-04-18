@@ -85,7 +85,7 @@ func newValidateCmd(configPath *string, logLevel *string) *cobra.Command {
 			if err := cfg.Validate(); err != nil {
 				return err
 			}
-			fmt.Println("validation succeeded")
+			fmt.Println("config validation succeeded")
 			if err := printValidationExecutionPlan(cfg); err != nil {
 				return err
 			}

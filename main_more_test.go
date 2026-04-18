@@ -326,3 +326,52 @@ func TestNewHealthzClientAndURLDisablesProxy(t *testing.T) {
 		t.Fatalf("proxy must be disabled for check-healthz")
 	}
 }
+
+func TestNewHealthzClientAndURLErrors(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Server.Network = "tcp"
+	cfg.Server.Addr = "bad-addr"
+	if _, _, err := newHealthzClientAndURL(cfg, 500*time.Millisecond); err == nil {
+		t.Fatalf("expected invalid server.addr error")
+	}
+
+	cfg = defaultConfig()
+	cfg.Server.Network = "unix"
+	cfg.Server.UnixSocket = ""
+	if _, _, err := newHealthzClientAndURL(cfg, 500*time.Millisecond); err == nil {
+		t.Fatalf("expected missing unix socket error")
+	}
+
+	cfg = defaultConfig()
+	cfg.Server.Network = "weird"
+	if _, _, err := newHealthzClientAndURL(cfg, 500*time.Millisecond); err == nil {
+		t.Fatalf("expected invalid network error")
+	}
+}
+
+func TestCheckHealthzEndpointStatusFailure(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(ts.Close)
+
+	u, err := url.Parse(ts.URL)
+	if err != nil {
+		t.Fatalf("parse test server url: %v", err)
+	}
+	cfg := defaultConfig()
+	cfg.Server.Network = "tcp"
+	cfg.Server.Addr = u.Host
+
+	err = checkHealthzEndpoint(cfg, 500*time.Millisecond)
+	if err == nil {
+		t.Fatalf("expected status failure")
+	}
+	if !strings.Contains(err.Error(), "unexpected status") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
