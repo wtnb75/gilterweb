@@ -278,6 +278,7 @@ func TestValidateCmdCheckHealthzUnixSuccess(t *testing.T) {
 	}()
 	t.Cleanup(func() {
 		_ = srv.Shutdown(context.Background())
+		_ = ln.Close()
 		_ = os.Remove(sock)
 	})
 
