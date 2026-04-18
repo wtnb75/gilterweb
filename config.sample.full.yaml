@@ -31,8 +31,8 @@ filters:
     params:
       method: "{{ .req.method }}"
       path: "{{ .req.path }}"
-      user_agent: '{{ default "unknown" (index .req.headers "User-Agent") }}'
-      request_id: '{{ default "none" (index .req.headers "X-Request-ID") }}'
+      user_agent: "{{ default \"unknown\" (index .req.headers \"User-Agent\") }}"
+      request_id: "{{ default \"none\" (index .req.headers \"X-Request-ID\") }}"
 
   # 2) env: read env var with fallback
   - id: ENV_HOME
@@ -48,7 +48,7 @@ filters:
       command:
         - sh
         - -c
-        - 'printf ''exec:%s'' "{{ .ENV_HOME }}"'
+        - "printf 'exec:%s' \"{{ .ENV_HOME }}\""
       timeout: 2s
 
   # 4) file: read workspace file as plain text
@@ -90,7 +90,8 @@ filters:
   # 7) jq: parse JSON string and extract fields
   - id: JQ_SOURCE
     type: static
-    params: '{"path":"{{ .B64_DECODE_PATH }}","home":"{{ .ENV_HOME }}","ok":true}'
+    params: "{\"path\":\"{{ .B64_DECODE_PATH }}\",\"home\":\"{{ .ENV_HOME
+      }}\",\"ok\":true}"
 
   - id: JQ_SELECT
     type: jq
@@ -104,7 +105,7 @@ filters:
     params:
       filter: EXEC_ECHO
       ttl: 30s
-      key: '{{ .REQ_SUMMARY.path }}:{{ default "/tmp" .ENV_HOME }}'
+      key: "{{ .REQ_SUMMARY.path }}:{{ default \"/tmp\" .ENV_HOME }}"
 
   # 9) http: call external endpoint (requires outbound network)
   - id: HTTP_ECHO
@@ -114,15 +115,15 @@ filters:
       url: https://httpbin.org/anything
       headers:
         Content-Type: application/json
-      body: '{"path":"{{ .req.path }}","from":"gilterweb"}'
+      body: "{\"path\":\"{{ .req.path }}\",\"from\":\"gilterweb\"}"
 
   # 10) path params: dynamic endpoint variables from URL
   - id: PATH_PARAM_VIEW
     type: static
     params:
       route: "{{ .req.path }}"
-      user_id: '{{ default "unknown" (index .req.path_params "id") }}'
-      section: '{{ default "none" (index .req.path_params "section") }}'
+      user_id: "{{ default \"unknown\" (index .req.path_params \"id\") }}"
+      section: "{{ default \"none\" (index .req.path_params \"section\") }}"
       note: "values are from .req.path_params"
 
   # Final composed response
@@ -134,7 +135,7 @@ filters:
         path: "{{ .REQ_SUMMARY.path }}"
       env_home: "{{ .ENV_HOME }}"
       exec_stdout: "{{ .CACHED_EXEC.stdout }}"
-      file_preview: "{{ .FILE_GOMOD | trim }}"
+      file_preview: "{{ .FILE_GOMOD | trimSpace }}"
       base64:
         encoded: "{{ .B64_ENCODE_PATH }}"
         decoded: "{{ .B64_DECODE_PATH }}"
