@@ -15,10 +15,16 @@ builds:
       - linux
       - windows
       - darwin
-      - wasip1
     goarch:
       - amd64
       - arm64
+  - id: gilterweb-wasi
+    main: .
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - wasip1
+    goarch:
       - wasm
 
 dockers:
