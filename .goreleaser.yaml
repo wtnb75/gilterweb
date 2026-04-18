@@ -73,7 +73,7 @@ archives:
   - formats: [ binary ]
 
 snapshot:
-  version_template: "{{ .ShortCommit }}"
+  version_template: "{{ .Branch }}"
 
 changelog:
   disable: true
