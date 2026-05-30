@@ -35,15 +35,40 @@ func flattenHeaders(h http.Header) map[string]string {
 	return m
 }
 
+func flattenCookies(cookies []*http.Cookie) map[string]string {
+	m := map[string]string{}
+	for _, c := range cookies {
+		m[c.Name] = c.Value
+	}
+	return m
+}
+
+func normalizeHeaders(headers map[string]string) map[string]any {
+	m := map[string]any{}
+	for k, v := range headers {
+		m[k] = v
+		underscore := strings.ToLower(strings.ReplaceAll(k, "-", "_"))
+		if _, exists := m[underscore]; !exists {
+			m[underscore] = v
+		}
+	}
+	return m
+}
+
 func buildRequestContext(
 	method, path, rawQuery, host, remoteAddr string,
 	pathParams map[string]string,
 	headers map[string]string,
+	cookies map[string]string,
 	body []byte,
 ) map[string]any {
 	pp := map[string]any{}
 	for k, v := range pathParams {
 		pp[k] = v
+	}
+	cookieMap := map[string]any{}
+	for k, v := range cookies {
+		cookieMap[k] = v
 	}
 	out := map[string]any{
 		"method":       method,
@@ -52,7 +77,8 @@ func buildRequestContext(
 		"host":         host,
 		"remote_addr":  remoteAddr,
 		"query":        map[string]any{},
-		"headers":      headers,
+		"headers":      normalizeHeaders(headers),
+		"cookies":      cookieMap,
 		"content_type": headers["Content-Type"],
 		"body_raw":     string(body),
 		"body_text":    string(body),

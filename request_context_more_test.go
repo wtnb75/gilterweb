@@ -79,7 +79,8 @@ func TestMatchRoute(t *testing.T) {
 
 func TestBuildRequestContextPathParams(t *testing.T) {
 	h := map[string]string{"Content-Type": "text/plain"}
-	ctx := buildRequestContext("GET", "/users/42", "", "h", "r", map[string]string{"id": "42"}, h, []byte("ok"))
+	ctx := buildRequestContext("GET", "/users/42", "", "h", "r",
+		map[string]string{"id": "42"}, h, map[string]string{}, []byte("ok"))
 	req := ctx["req"].(map[string]any)
 	pp, ok := req["path_params"].(map[string]any)
 	if !ok {
@@ -87,5 +88,73 @@ func TestBuildRequestContextPathParams(t *testing.T) {
 	}
 	if pp["id"] != "42" {
 		t.Fatalf("path_params.id = %#v", pp["id"])
+	}
+}
+
+func TestBuildRequestContextCookies(t *testing.T) {
+	h := map[string]string{"Content-Type": "text/plain"}
+	cookies := map[string]string{"session": "abc123", "theme": "dark"}
+	ctx := buildRequestContext("GET", "/", "", "h", "r", map[string]string{}, h, cookies, []byte(""))
+	req := ctx["req"].(map[string]any)
+	c, ok := req["cookies"].(map[string]any)
+	if !ok {
+		t.Fatalf("cookies type = %T", req["cookies"])
+	}
+	if c["session"] != "abc123" {
+		t.Fatalf("cookies.session = %#v", c["session"])
+	}
+	if c["theme"] != "dark" {
+		t.Fatalf("cookies.theme = %#v", c["theme"])
+	}
+}
+
+func TestFlattenCookies(t *testing.T) {
+	cookies := []*http.Cookie{
+		{Name: "session", Value: "abc123"},
+		{Name: "theme", Value: "dark"},
+	}
+	m := flattenCookies(cookies)
+	if m["session"] != "abc123" || m["theme"] != "dark" {
+		t.Fatalf("flattenCookies = %#v", m)
+	}
+	if got := flattenCookies(nil); len(got) != 0 {
+		t.Fatalf("empty cookies should return empty map: %#v", got)
+	}
+}
+
+func TestNormalizeHeaders(t *testing.T) {
+	h := map[string]string{
+		"Accept-Encoding": "gzip",
+		"Content-Type":    "application/json",
+		"X-Request-Id":    "abc",
+	}
+	m := normalizeHeaders(h)
+	if m["Accept-Encoding"] != "gzip" {
+		t.Fatalf("original key preserved: %#v", m["Accept-Encoding"])
+	}
+	if m["accept_encoding"] != "gzip" {
+		t.Fatalf("underscore key: %#v", m["accept_encoding"])
+	}
+	if m["content_type"] != "application/json" {
+		t.Fatalf("content_type: %#v", m["content_type"])
+	}
+	if m["x_request_id"] != "abc" {
+		t.Fatalf("x_request_id: %#v", m["x_request_id"])
+	}
+}
+
+func TestBuildRequestContextHeadersNormalized(t *testing.T) {
+	h := map[string]string{"Accept-Encoding": "gzip", "Content-Type": "text/plain"}
+	ctx := buildRequestContext("GET", "/", "", "h", "r", map[string]string{}, h, map[string]string{}, []byte(""))
+	req := ctx["req"].(map[string]any)
+	headers, ok := req["headers"].(map[string]any)
+	if !ok {
+		t.Fatalf("headers type = %T", req["headers"])
+	}
+	if headers["Accept-Encoding"] != "gzip" {
+		t.Fatalf("original key: %#v", headers["Accept-Encoding"])
+	}
+	if headers["accept_encoding"] != "gzip" {
+		t.Fatalf("underscore key: %#v", headers["accept_encoding"])
 	}
 }
