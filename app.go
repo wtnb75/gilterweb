@@ -198,7 +198,7 @@ func (a *App) Check(ctx context.Context, in CheckRequest) (any, error) {
 	route := rm.route
 	reqCtx := buildRequestContext(
 		strings.ToUpper(in.Method), in.Path, "", "", "",
-		rm.pathParams, headers, []byte(body),
+		rm.pathParams, headers, map[string]string{}, []byte(body),
 	)
 	reqID := a.nextRequestID()
 	ctx = context.WithValue(ctx, requestIDKey{}, reqID)
@@ -251,7 +251,7 @@ func (a *App) handleRequest(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	reqCtxData := buildRequestContext(
 		r.Method, r.URL.Path, r.URL.RawQuery,
-		r.Host, r.RemoteAddr, rm.pathParams, flattenHeaders(r.Header), body,
+		r.Host, r.RemoteAddr, rm.pathParams, flattenHeaders(r.Header), flattenCookies(r.Cookies()), body,
 	)
 	res, err := engine.Execute(ctx, route.Filter, reqCtxData)
 	if err != nil {
