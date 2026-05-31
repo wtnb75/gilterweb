@@ -205,22 +205,42 @@ var lookupEnv = func(k string) (string, bool) {
 	return os.LookupEnv(k)
 }
 
+func (e *Engine) renderStringMap(m map[string]string, data map[string]any) (map[string]string, error) {
+	out := make(map[string]string, len(m))
+	for k, v := range m {
+		rendered, err := renderTemplate(v, data, e.renderFuncs)
+		if err != nil {
+			return nil, err
+		}
+		out[k] = rendered
+	}
+	return out, nil
+}
+
 func (e *Engine) execHTTPFilter(ctx context.Context, f FilterConfig, data map[string]any) (any, error) {
 	params, ok := asMap(f.Params)
 	if !ok {
 		return nil, fmt.Errorf("http params must be object")
 	}
-	unixSocket := toString(params["unix_socket"])
-	method := toString(params["method"])
+	unixSocket, err := renderTemplate(toString(params["unix_socket"]), data, e.renderFuncs)
+	if err != nil {
+		return nil, err
+	}
+	method, err := renderTemplate(toString(params["method"]), data, e.renderFuncs)
+	if err != nil {
+		return nil, err
+	}
 	if method == "" {
 		method = http.MethodGet
 	}
-	url := toString(params["url"])
+	url, err := renderTemplate(toString(params["url"]), data, e.renderFuncs)
+	if err != nil {
+		return nil, err
+	}
 	if url == "" {
 		return nil, fmt.Errorf("http.url required")
 	}
-	bodyTpl := toString(params["body"])
-	body, err := renderTemplate(bodyTpl, data, e.renderFuncs)
+	body, err := renderTemplate(toString(params["body"]), data, e.renderFuncs)
 	if err != nil {
 		return nil, err
 	}
@@ -228,7 +248,11 @@ func (e *Engine) execHTTPFilter(ctx context.Context, f FilterConfig, data map[st
 	if err != nil {
 		return nil, err
 	}
-	for k, v := range toStringMap(params["headers"]) {
+	headers, err := e.renderStringMap(toStringMap(params["headers"]), data)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
 	client := http.DefaultClient
@@ -289,13 +313,17 @@ func (e *Engine) execExecFilter(ctx context.Context, f FilterConfig, data map[st
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(execCtx, cmdArgs[0], cmdArgs[1:]...)
-	for k, v := range toStringMap(params["env"]) {
+	envVars, err := e.renderStringMap(toStringMap(params["env"]), data)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range envVars {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	err := cmd.Run()
+	err = cmd.Run()
 	timedOut := execCtx.Err() == context.DeadlineExceeded
 	code := 0
 	if err != nil {

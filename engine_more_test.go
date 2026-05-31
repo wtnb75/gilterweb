@@ -59,6 +59,41 @@ func TestExecHTTPFilter(t *testing.T) {
 	}
 }
 
+func TestExecHTTPFilterTemplateHeaders(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Got-Cookie", r.Header.Get("Cookie"))
+		w.Header().Set("X-Got-Path", r.URL.Path)
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	e := newTestEngine()
+	f := FilterConfig{Params: map[string]any{
+		"url": ts.URL + "/{{ .req.path }}",
+		"headers": map[string]any{
+			"Cookie": "{{ .req.cookies.session }}",
+		},
+	}}
+	data := map[string]any{
+		"req": map[string]any{
+			"path":    "mypath",
+			"cookies": map[string]any{"session": "tok123"},
+		},
+	}
+	out, err := e.execHTTPFilter(context.Background(), f, data)
+	if err != nil {
+		t.Fatalf("execHTTPFilter err: %v", err)
+	}
+	m := out.(map[string]any)
+	respHeaders := m["headers"].(map[string]string)
+	if respHeaders["X-Got-Cookie"] != "tok123" {
+		t.Fatalf("Cookie header not expanded: %q", respHeaders["X-Got-Cookie"])
+	}
+	if respHeaders["X-Got-Path"] != "/mypath" {
+		t.Fatalf("url not expanded: %q", respHeaders["X-Got-Path"])
+	}
+}
+
 func TestExecExecFilter(t *testing.T) {
 	e := newTestEngine()
 	f := FilterConfig{Params: map[string]any{
@@ -71,6 +106,22 @@ func TestExecExecFilter(t *testing.T) {
 	m := out.(map[string]any)
 	if m["stdout"] != "hello" || m["code"] != 0 {
 		t.Fatalf("exec output = %#v", m)
+	}
+}
+
+func TestExecExecFilterTemplateEnv(t *testing.T) {
+	e := newTestEngine()
+	f := FilterConfig{Params: map[string]any{
+		"command": []any{"sh", "-c", "printf $MY_VAL"},
+		"env":     map[string]any{"MY_VAL": "{{ .req.id }}"},
+	}}
+	out, err := e.execExecFilter(context.Background(), f, map[string]any{"req": map[string]any{"id": "abc"}})
+	if err != nil {
+		t.Fatalf("execExecFilter err: %v", err)
+	}
+	m := out.(map[string]any)
+	if m["stdout"] != "abc" {
+		t.Fatalf("env template not expanded: stdout=%q", m["stdout"])
 	}
 }
 
