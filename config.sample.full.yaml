@@ -28,13 +28,21 @@ compression:
 
 filters:
   # 1) static: build request summary from request context
+  #    Headers are accessible in two ways:
+  #      - underscore form: .req.headers.user_agent  (dash replaced by underscore, lowercased)
+  #      - original form:   index .req.headers "User-Agent"
+  #    Cookies are accessible via .req.cookies.(name)
   - id: REQ_SUMMARY
     type: static
     params:
       method: "{{ .req.method }}"
       path: "{{ .req.path }}"
-      user_agent: "{{ default \"unknown\" (index .req.headers \"User-Agent\") }}"
-      request_id: "{{ default \"none\" (index .req.headers \"X-Request-ID\") }}"
+      host: "{{ .req.host }}"
+      user_agent: "{{ default \"unknown\" .req.headers.user_agent }}"
+      accept_encoding: "{{ .req.headers.accept_encoding }}"
+      request_id: "{{ default \"none\" .req.headers.x_request_id }}"
+      # request cookies: .req.cookies.(name)
+      session_cookie: "{{ default \"\" .req.cookies.session }}"
 
   # 2) env: read env var with fallback
   - id: ENV_HOME
@@ -44,14 +52,18 @@ filters:
       default: /tmp
 
   # 3) exec: run local shell command
+  #    env values support template expansion just like command args
   - id: EXEC_ECHO
     type: exec
     params:
       command:
         - sh
         - -c
-        - "printf 'exec:%s' \"{{ .ENV_HOME }}\""
+        - "printf 'home:%s path:%s' \"$GW_HOME\" \"$GW_PATH\""
       timeout: 2s
+      env:
+        GW_HOME: "{{ .ENV_HOME }}"
+        GW_PATH: "{{ .req.path }}"
 
   # 4) file: read workspace file as plain text
   - id: FILE_GOMOD
@@ -109,14 +121,19 @@ filters:
       ttl: 30s
       key: "{{ .REQ_SUMMARY.path }}:{{ default \"/tmp\" .ENV_HOME }}"
 
-  # 9) http: call external endpoint (requires outbound network)
+  # 9) http: call external endpoint
+  #    url, method, unix_socket, and header values all support template expansion.
+  #    This example forwards the incoming Cookie header and host to the upstream.
   - id: HTTP_ECHO
     type: http
     params:
       method: POST
-      url: https://httpbin.org/anything
+      url: "https://httpbin.org/anything{{ .req.path }}"
       headers:
         Content-Type: application/json
+        # forward incoming Cookie header to upstream
+        Cookie: "{{ .req.headers.cookie }}"
+        X-Forwarded-Host: "{{ .req.host }}"
       body: "{\"path\":\"{{ .req.path }}\",\"from\":\"gilterweb\"}"
 
   # 10) path params: dynamic endpoint variables from URL
@@ -128,6 +145,28 @@ filters:
       section: "{{ default \"none\" (index .req.path_params \"section\") }}"
       note: "values are from .req.path_params"
 
+  # 11) http: upstream that sets response cookies
+  #     Demonstrates forwarding a request cookie and receiving a response cookie.
+  - id: HTTP_WITH_COOKIES
+    type: http
+    params:
+      method: GET
+      url: "https://httpbin.org/cookies/set/demo/value"
+      headers:
+        # forward session cookie from incoming request
+        Cookie: "{{ .req.cookies.session }}"
+
+  # 12) static: access response cookies and headers from HTTP_WITH_COOKIES
+  #     Response cookies:  .(filter_id).cookies.(name)
+  #     Response headers:  .(filter_id).headers.(name_with_underscores)
+  #                     or index .(filter_id).headers "Original-Name"
+  - id: COOKIE_RESULT
+    type: static
+    params:
+      demo_cookie: "{{ .HTTP_WITH_COOKIES.cookies.demo }}"
+      content_type: "{{ .HTTP_WITH_COOKIES.headers.content_type }}"
+      upstream_status: "{{ .HTTP_WITH_COOKIES.status }}"
+
   # Final composed response
   - id: RESPONSE_ALL
     type: static
@@ -135,6 +174,8 @@ filters:
       request:
         method: "{{ .REQ_SUMMARY.method }}"
         path: "{{ .REQ_SUMMARY.path }}"
+        accept_encoding: "{{ .REQ_SUMMARY.accept_encoding }}"
+        session_cookie: "{{ .REQ_SUMMARY.session_cookie }}"
       env_home: "{{ .ENV_HOME }}"
       exec_stdout: "{{ .CACHED_EXEC.stdout }}"
       file_preview: "{{ .FILE_GOMOD | trimSpace }}"
@@ -184,3 +225,8 @@ paths:
     filter: RESPONSE_ALL
     compression:
       enabled: false
+
+  # Cookie forwarding and response cookie access demonstration
+  - method: GET
+    path: /demo/cookies
+    filter: COOKIE_RESULT
