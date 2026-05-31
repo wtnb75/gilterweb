@@ -53,7 +53,7 @@ func TestExecHTTPFilter(t *testing.T) {
 	if m["status"] != 200 {
 		t.Fatalf("status = %#v", m["status"])
 	}
-	headers := m["headers"].(map[string]string)
+	headers := m["headers"].(map[string]any)
 	if headers["X-Echo"] != "abc" {
 		t.Fatalf("headers = %#v", headers)
 	}
@@ -85,12 +85,39 @@ func TestExecHTTPFilterTemplateHeaders(t *testing.T) {
 		t.Fatalf("execHTTPFilter err: %v", err)
 	}
 	m := out.(map[string]any)
-	respHeaders := m["headers"].(map[string]string)
+	respHeaders := m["headers"].(map[string]any)
 	if respHeaders["X-Got-Cookie"] != "tok123" {
 		t.Fatalf("Cookie header not expanded: %q", respHeaders["X-Got-Cookie"])
 	}
 	if respHeaders["X-Got-Path"] != "/mypath" {
 		t.Fatalf("url not expanded: %q", respHeaders["X-Got-Path"])
+	}
+}
+
+func TestExecHTTPFilterResponseCookies(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{Name: "session", Value: "tok456"})
+		http.SetCookie(w, &http.Cookie{Name: "theme", Value: "dark"})
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer ts.Close()
+
+	e := newTestEngine()
+	f := FilterConfig{Params: map[string]any{"url": ts.URL}}
+	out, err := e.execHTTPFilter(context.Background(), f, map[string]any{})
+	if err != nil {
+		t.Fatalf("execHTTPFilter err: %v", err)
+	}
+	m := out.(map[string]any)
+	cookies, ok := m["cookies"].(map[string]any)
+	if !ok {
+		t.Fatalf("cookies type = %T", m["cookies"])
+	}
+	if cookies["session"] != "tok456" {
+		t.Fatalf("cookies.session = %#v", cookies["session"])
+	}
+	if cookies["theme"] != "dark" {
+		t.Fatalf("cookies.theme = %#v", cookies["theme"])
 	}
 }
 

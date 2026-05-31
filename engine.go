@@ -274,9 +274,14 @@ func (e *Engine) execHTTPFilter(ctx context.Context, f FilterConfig, data map[st
 	if err != nil {
 		return nil, err
 	}
+	cookieMap := map[string]any{}
+	for _, c := range resp.Cookies() {
+		cookieMap[c.Name] = c.Value
+	}
 	out := map[string]any{
 		"status":  resp.StatusCode,
-		"headers": flattenHeaders(resp.Header),
+		"headers": normalizeHeaders(flattenHeaders(resp.Header)),
+		"cookies": cookieMap,
 		"raw":     string(raw),
 		"body":    parseBody(resp.Header.Get("Content-Type"), raw),
 	}
