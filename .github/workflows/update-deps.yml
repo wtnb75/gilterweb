@@ -1,7 +1,7 @@
-name: update go.mod
+name: update-deps
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: {}
 
 permissions:
   contents: write
@@ -11,45 +11,8 @@ jobs:
   update-deps:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-
-      - name: setup go
-        uses: actions/setup-go@v6
-        with:
-          go-version: stable
-          cache: true
-
-      - name: update dependencies
-        run: |
-          go get -u ./...
-          go mod tidy
-
-      - name: detect go module changes
-        id: changes
-        run: |
-          if git diff --quiet -- go.mod go.sum; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: run unit tests
-        if: steps.changes.outputs.changed == 'true'
-        run: go test -v ./...
-
-      - name: create pull request
-        if: steps.changes.outputs.changed == 'true'
-        uses: peter-evans/create-pull-request@v8
-        with:
-          commit-message: "chore(deps): update go dependencies"
-          title: "chore(deps): update go dependencies"
-          body: |
-            Automated dependency update:
-            - ran `go get -u ./...`
-            - ran `go mod tidy`
-            - ran unit tests (`go test -v ./...`)
-          branch: chore/auto-update-go-deps
-          delete-branch: true
-          add-paths: |
-            go.mod
-            go.sum
+    - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+    - uses: wtnb75/actions/golang@e91993ee54862b807c74f88477c8818b6c300d5b # v1.0.0
+    - uses: wtnb75/actions/goupdate@e91993ee54862b807c74f88477c8818b6c300d5b # v1.0.0
+      with:
+        go-test-args: "-v ./..."
