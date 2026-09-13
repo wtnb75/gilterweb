@@ -184,6 +184,11 @@ func (c Config) Validate() error {
 			}
 		}
 	}
+	for _, f := range c.Filters {
+		if err := validateFilterParams(f, ids); err != nil {
+			return fmt.Errorf("filter '%s': %w", f.ID, err)
+		}
+	}
 	for _, p := range c.Paths {
 		if !ids[p.Filter] {
 			return fmt.Errorf("path filter undefined: %s", p.Filter)
