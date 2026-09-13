@@ -24,6 +24,16 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
+const (
+	// staticExpansionMaxDepth bounds recursion in expandStatic to guard
+	// against pathological nested static params configs.
+	staticExpansionMaxDepth = 10
+	// defaultExecTimeout applies to the exec filter when params.timeout is unset.
+	defaultExecTimeout = 5 * time.Second
+	// defaultCacheTTL applies to the cache filter when params.ttl is unset.
+	defaultCacheTTL = 60 * time.Second
+)
+
 type Engine struct {
 	cfg         Config
 	filters     map[string]FilterConfig
@@ -143,7 +153,7 @@ func (e *Engine) execFilter(ctx context.Context, f FilterConfig, data map[string
 }
 
 func (e *Engine) expandStatic(v any, data map[string]any, depth int) (any, error) {
-	if depth > 10 {
+	if depth > staticExpansionMaxDepth {
 		return nil, fmt.Errorf("static params nesting depth exceeded")
 	}
 	switch x := v.(type) {
@@ -187,7 +197,7 @@ func renderTemplate(tpl string, data map[string]any, fn template.FuncMap) (strin
 }
 
 func execEnvFilter(f FilterConfig) (any, error) {
-	params, ok := f.Params.(map[string]any)
+	params, ok := asMap(f.Params)
 	if !ok {
 		return nil, fmt.Errorf("env params must be object")
 	}
@@ -309,7 +319,7 @@ func (e *Engine) execExecFilter(ctx context.Context, f FilterConfig, data map[st
 		cmdArgs = append(cmdArgs, arg)
 	}
 
-	timeout := 5 * time.Second
+	timeout := defaultExecTimeout
 	if t := toString(params["timeout"]); t != "" {
 		d, err := time.ParseDuration(t)
 		if err != nil {
@@ -411,7 +421,7 @@ func (e *Engine) execJQFilter(f FilterConfig, data map[string]any) (any, error) 
 }
 
 func (e *Engine) execBase64Filter(f FilterConfig, data map[string]any) (any, error) {
-	params, ok := f.Params.(map[string]any)
+	params, ok := asMap(f.Params)
 	if !ok {
 		return nil, fmt.Errorf("base64 params must be object")
 	}
@@ -436,7 +446,7 @@ func (e *Engine) execBase64Filter(f FilterConfig, data map[string]any) (any, err
 }
 
 func (e *Engine) execRegexFilter(f FilterConfig, data map[string]any) (any, error) {
-	params, ok := f.Params.(map[string]any)
+	params, ok := asMap(f.Params)
 	if !ok {
 		return nil, fmt.Errorf("regex params must be object")
 	}
@@ -512,7 +522,7 @@ func expandRegexReplace(re *regexp.Regexp, input, replace string) string {
 }
 
 func (e *Engine) execCacheFilter(ctx context.Context, f FilterConfig, data map[string]any) (any, error) {
-	params, ok := f.Params.(map[string]any)
+	params, ok := asMap(f.Params)
 	if !ok {
 		return nil, fmt.Errorf("cache params must be object")
 	}
@@ -520,13 +530,13 @@ func (e *Engine) execCacheFilter(ctx context.Context, f FilterConfig, data map[s
 	if target == "" {
 		return nil, fmt.Errorf("cache.filter required")
 	}
-	ttlStr, _ := params["ttl"].(string)
-	if ttlStr == "" {
-		ttlStr = "60s"
-	}
-	ttl, err := time.ParseDuration(ttlStr)
-	if err != nil {
-		return nil, err
+	ttl := defaultCacheTTL
+	if ttlStr, _ := params["ttl"].(string); ttlStr != "" {
+		parsed, err := time.ParseDuration(ttlStr)
+		if err != nil {
+			return nil, err
+		}
+		ttl = parsed
 	}
 	keyTpl, _ := params["key"].(string)
 	key, err := renderTemplate(keyTpl, data, e.renderFuncs)

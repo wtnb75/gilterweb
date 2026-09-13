@@ -22,6 +22,10 @@ import (
 	"github.com/google/uuid"
 )
 
+// unixSocketProbeTimeout bounds the dial used to check whether an existing
+// unix socket path is a stale (unowned) socket versus one already in use.
+const unixSocketProbeTimeout = 500 * time.Millisecond
+
 type App struct {
 	mu          sync.RWMutex
 	cfg         Config
@@ -116,7 +120,7 @@ var chmodFile = os.Chmod
 
 func prepareUnixListener(socketPath string) (net.Listener, error) {
 	if st, err := os.Stat(socketPath); err == nil && st.Mode()&os.ModeSocket != 0 {
-		conn, err := net.DialTimeout("unix", socketPath, 500*time.Millisecond)
+		conn, err := net.DialTimeout("unix", socketPath, unixSocketProbeTimeout)
 		if err == nil {
 			_ = conn.Close()
 			return nil, fmt.Errorf("unix socket already in use: %s", socketPath)
