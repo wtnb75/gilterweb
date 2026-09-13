@@ -18,7 +18,7 @@ Filter-driven HTTP server written in Go.
 
 ## Requirements
 
-- Go 1.22+
+- Go 1.26+
 
 ## Quick Start
 
