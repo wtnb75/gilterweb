@@ -21,10 +21,10 @@ func TestExpandStaticAndRenderTemplateErrorBranches(t *testing.T) {
 		t.Fatalf("expandStatic map result=%#v", v)
 	}
 
-	if _, err := renderTemplate("{{", data, e.renderFuncs); err == nil {
+	if _, err := e.renderTemplate("{{", data); err == nil {
 		t.Fatalf("expected template parse error")
 	}
-	if _, err := renderTemplate(`{{ required "x" .nope }}`, data, e.renderFuncs); err == nil {
+	if _, err := e.renderTemplate(`{{ required "x" .nope }}`, data); err == nil {
 		t.Fatalf("expected template execute error")
 	}
 }
