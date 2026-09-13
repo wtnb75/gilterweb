@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/itchyny/gojq"
+	"golang.org/x/sync/singleflight"
 )
 
 type Engine struct {
@@ -30,6 +31,7 @@ type Engine struct {
 	cache       *TTLCache
 	renderFuncs template.FuncMap
 	logger      *slog.Logger
+	cacheGroup  singleflight.Group
 }
 
 var ErrFilterOutputTooLarge = errors.New("filter output too large")
@@ -547,12 +549,26 @@ func (e *Engine) execCacheFilter(ctx context.Context, f FilterConfig, data map[s
 		"target_filter", target,
 		"cache_key", cacheKey,
 	)
-	res, err := e.execFilter(ctx, e.filters[target], data)
-	if err != nil {
-		return nil, err
+	// singleflight collapses concurrent misses on the same key into one
+	// backend call; shared waiters run under the leader's context, so a
+	// waiter's own ctx cancellation does not abort the in-flight call.
+	res, err, shared := e.cacheGroup.Do(cacheKey, func() (any, error) {
+		res, err := e.execFilter(ctx, e.filters[target], data)
+		if err != nil {
+			return nil, err
+		}
+		e.cache.Set(cacheKey, ttl, res)
+		return res, nil
+	})
+	if shared {
+		e.logger.Info("cache singleflight shared",
+			"request_id", requestIDFromContext(ctx),
+			"filter_id", f.ID,
+			"target_filter", target,
+			"cache_key", cacheKey,
+		)
 	}
-	e.cache.Set(cacheKey, ttl, res)
-	return res, nil
+	return res, err
 }
 
 func tooLarge(v any, limit int64) bool {

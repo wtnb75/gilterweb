@@ -50,6 +50,11 @@
         "max_filter_output_size": {
           "type": "integer",
           "minimum": 1
+        },
+        "cache_max_entries": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Max entries kept by the cache filter's TTL cache; least-recently-used entries are evicted beyond this."
         }
       },
       "required": [

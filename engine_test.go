@@ -33,7 +33,7 @@ func TestRegexNamedAndNumberedGroups(t *testing.T) {
 	for _, f := range cfg.Filters {
 		idx[f.ID] = f
 	}
-	eng := NewEngine(cfg, idx, NewTTLCache(), nil)
+	eng := NewEngine(cfg, idx, NewTTLCache(1000), nil)
 	v, err := eng.Execute(context.Background(), "R", map[string]any{"req": map[string]any{}})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -53,7 +53,7 @@ func TestStaticDepthLimit(t *testing.T) {
 	deep := makeDeepMap(11, "{{.req.path}}")
 	cfg.Filters = []FilterConfig{{ID: "S", Type: "static", Params: deep}}
 	idx := map[string]FilterConfig{"S": cfg.Filters[0]}
-	eng := NewEngine(cfg, idx, NewTTLCache(), nil)
+	eng := NewEngine(cfg, idx, NewTTLCache(1000), nil)
 	_, err := eng.Execute(context.Background(), "S", map[string]any{"req": map[string]any{"path": "/x"}})
 	if err == nil {
 		t.Fatalf("expected depth limit error")
@@ -74,7 +74,7 @@ func TestCacheFilterHit(t *testing.T) {
 		{ID: "C", Type: "cache", Params: map[string]any{"filter": "A", "ttl": "60s", "key": "{{.req.path}}"}},
 	}
 	idx := map[string]FilterConfig{"A": cfg.Filters[0], "C": cfg.Filters[1]}
-	cache := NewTTLCache()
+	cache := NewTTLCache(1000)
 	eng := NewEngine(cfg, idx, cache, nil)
 	v1, err := eng.Execute(context.Background(), "C", map[string]any{"req": map[string]any{"path": "/p"}})
 	if err != nil {

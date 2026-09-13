@@ -32,6 +32,7 @@ type ServerConfig struct {
 	ShutdownTimeout     time.Duration `yaml:"shutdown_timeout"`
 	MaxBodySize         int64         `yaml:"max_body_size"`
 	MaxFilterOutputSize int64         `yaml:"max_filter_output_size"`
+	CacheMaxEntries     int           `yaml:"cache_max_entries"`
 }
 
 type LogConfig struct {
@@ -105,6 +106,7 @@ func defaultConfig() Config {
 			ShutdownTimeout:     10 * time.Second,
 			MaxBodySize:         10 * 1024 * 1024,
 			MaxFilterOutputSize: 100 * 1024 * 1024,
+			CacheMaxEntries:     10000,
 		},
 		Log: LogConfig{Level: "info", Format: "json"},
 		Compression: CompressionConfig{
@@ -139,6 +141,9 @@ func (c Config) Validate() error {
 	}
 	if c.Server.MaxFilterOutputSize <= 0 {
 		return fmt.Errorf("server.max_filter_output_size must be > 0")
+	}
+	if c.Server.CacheMaxEntries <= 0 {
+		return fmt.Errorf("server.cache_max_entries must be > 0")
 	}
 	if !inSet(c.Log.Level, "debug", "info", "warn", "error") {
 		return fmt.Errorf("log.level must be debug|info|warn|error")

@@ -75,7 +75,7 @@ func TestWithRecoveryAndRenderResultAndTTLCache(t *testing.T) {
 		t.Fatalf("RenderResult map = %q", got)
 	}
 
-	c := NewTTLCache()
+	c := NewTTLCache(1000)
 	c.Set("k", 20*time.Millisecond, "v")
 	if v, ok := c.Get("k"); !ok || v != "v" {
 		t.Fatalf("cache get immediately failed: v=%v ok=%v", v, ok)

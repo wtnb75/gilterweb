@@ -2,6 +2,7 @@ package main
 
 import (
 	"compress/gzip"
+	"container/list"
 	"context"
 	"encoding/json"
 	"errors"
@@ -48,7 +49,7 @@ func NewApp(cfg Config) (*App, error) {
 	for _, f := range cfg.Filters {
 		index[f.ID] = f
 	}
-	cache := NewTTLCache()
+	cache := NewTTLCache(cfg.Server.CacheMaxEntries)
 	logger := NewLogger(cfg.Log)
 	eng := NewEngine(cfg, index, cache, logger)
 	mux := http.NewServeMux()
@@ -550,37 +551,62 @@ func RenderResult(v any) string {
 }
 
 type TTLCache struct {
-	mu      sync.RWMutex
-	entries map[string]ttlEntry
+	mu         sync.Mutex
+	maxEntries int
+	order      *list.List
+	entries    map[string]*list.Element
 }
 
 type ttlEntry struct {
+	key     string
 	expires time.Time
 	value   any
 }
 
-func NewTTLCache() *TTLCache {
-	return &TTLCache{entries: map[string]ttlEntry{}}
+func NewTTLCache(maxEntries int) *TTLCache {
+	return &TTLCache{
+		maxEntries: maxEntries,
+		order:      list.New(),
+		entries:    map[string]*list.Element{},
+	}
 }
 
 func (c *TTLCache) Get(key string) (any, bool) {
-	c.mu.RLock()
-	ent, ok := c.entries[key]
-	c.mu.RUnlock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	el, ok := c.entries[key]
 	if !ok {
 		return nil, false
 	}
+	ent := el.Value.(*ttlEntry)
 	if time.Now().After(ent.expires) {
-		c.mu.Lock()
+		c.order.Remove(el)
 		delete(c.entries, key)
-		c.mu.Unlock()
 		return nil, false
 	}
+	c.order.MoveToFront(el)
 	return ent.value, true
 }
 
 func (c *TTLCache) Set(key string, ttl time.Duration, value any) {
 	c.mu.Lock()
-	c.entries[key] = ttlEntry{expires: time.Now().Add(ttl), value: value}
-	c.mu.Unlock()
+	defer c.mu.Unlock()
+	expires := time.Now().Add(ttl)
+	if el, ok := c.entries[key]; ok {
+		ent := el.Value.(*ttlEntry)
+		ent.expires = expires
+		ent.value = value
+		c.order.MoveToFront(el)
+		return
+	}
+	el := c.order.PushFront(&ttlEntry{key: key, expires: expires, value: value})
+	c.entries[key] = el
+	for c.maxEntries > 0 && c.order.Len() > c.maxEntries {
+		oldest := c.order.Back()
+		if oldest == nil {
+			break
+		}
+		c.order.Remove(oldest)
+		delete(c.entries, oldest.Value.(*ttlEntry).key)
+	}
 }

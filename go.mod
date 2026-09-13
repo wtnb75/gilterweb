@@ -1,11 +1,12 @@
 module github.com/wtnb75/gilterweb
 
-go 1.24.0
+go 1.26.0
 
 require (
 	github.com/google/uuid v1.6.0
 	github.com/itchyny/gojq v0.12.19
 	github.com/spf13/cobra v1.10.2
+	golang.org/x/sync v0.23.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
