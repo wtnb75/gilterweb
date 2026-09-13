@@ -84,7 +84,12 @@ func (a *App) Run(ctx context.Context) error {
 			return err
 		}
 		if mode, parseErr := strconv.ParseUint(cfg.Server.UnixSocketMode, 8, 32); parseErr == nil {
-			_ = os.Chmod(cfg.Server.UnixSocket, os.FileMode(mode))
+			if chmodErr := chmodFile(cfg.Server.UnixSocket, os.FileMode(mode)); chmodErr != nil {
+				logger.Error("unix socket chmod failed",
+					"socket", cfg.Server.UnixSocket, "mode", cfg.Server.UnixSocketMode, "error", chmodErr)
+			}
+		} else {
+			logger.Error("unix socket mode parse failed", "mode", cfg.Server.UnixSocketMode, "error", parseErr)
 		}
 		defer func() {
 			_ = os.Remove(cfg.Server.UnixSocket)
@@ -105,6 +110,8 @@ func (a *App) Run(ctx context.Context) error {
 	logger.Error("server listen failed", "error", err)
 	return err
 }
+
+var chmodFile = os.Chmod
 
 func prepareUnixListener(socketPath string) (net.Listener, error) {
 	if st, err := os.Stat(socketPath); err == nil && st.Mode()&os.ModeSocket != 0 {

@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -128,5 +132,41 @@ func TestRunTcpAndUnix(t *testing.T) {
 	}
 	if err := <-done2; err != nil {
 		t.Fatalf("Run unix err: %v", err)
+	}
+}
+
+func TestRunUnixSocketChmodFailureLogged(t *testing.T) {
+	origChmod := chmodFile
+	wantErr := errors.New("boom")
+	chmodFile = func(_ string, _ os.FileMode) error { return wantErr }
+	defer func() { chmodFile = origChmod }()
+
+	cfg := testAppConfig()
+	cfg.Server.Network = "unix"
+	cfg.Server.UnixSocket = "/tmp/gw-chmod-test.sock"
+	cfg.Server.UnixSocketMode = "0660"
+	app, err := NewApp(cfg)
+	if err != nil {
+		t.Fatalf("NewApp err: %v", err)
+	}
+	var buf bytes.Buffer
+	app.logger = slog.New(slog.NewJSONHandler(&buf, nil))
+
+	done := make(chan error, 1)
+	go func() { done <- app.Run(context.Background()) }()
+	time.Sleep(20 * time.Millisecond)
+	if err := app.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown err: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Run err: %v", err)
+	}
+
+	logged := buf.String()
+	if !strings.Contains(logged, "unix socket chmod failed") {
+		t.Fatalf("expected chmod failure log, got: %s", logged)
+	}
+	if !strings.Contains(logged, "boom") {
+		t.Fatalf("expected chmod error message in log, got: %s", logged)
 	}
 }
