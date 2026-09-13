@@ -184,6 +184,16 @@ paths:
 - `filters[].type`: supported type only
 - `filters[].depends_on`: all references must exist in filters
 - **Cycle detection**: all filters must not have circular dependencies (including implicit dependencies inferred from template references)
+- `filters[].params`: type-specific required fields are checked statically, using only literal (non-template-rendered) config values:
+  - `env`: `name` required
+  - `http`: `url` required (the literal config value; a template that renders to empty at request time is not caught here)
+  - `exec`: `command` required, must be a non-empty array of strings
+  - `file`: `path` required
+  - `jq`: `query` required
+  - `base64`: `op` must be `encode` or `decode`
+  - `regex`: `op` must be `find`, `find_all`, or `replace`; `pattern` must compile as a regular expression; `replace` required when `op=replace`
+  - `cache`: `filter` required and must reference an existing filter id; `ttl`, if set, must parse as a duration
+  - `static`: no required fields
 - `paths[].filter`: must reference an existing filter id
 - `paths[].headers`: keys and values must be strings
 
