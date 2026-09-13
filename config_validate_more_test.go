@@ -78,4 +78,10 @@ func TestValidateServerAndLogBranches(t *testing.T) {
 	if err := cfg.Validate(); err == nil {
 		t.Fatalf("expected compression.algorithms error")
 	}
+
+	cfg = defaultConfig()
+	cfg.Server.CacheMaxEntries = 0
+	if err := cfg.Validate(); err == nil {
+		t.Fatalf("expected cache_max_entries error")
+	}
 }

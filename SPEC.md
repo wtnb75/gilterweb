@@ -143,6 +143,7 @@ server:
   request_timeout: 30s      # max request processing time (default: 30s)
   max_body_size: 10485760  # bytes, default: 10MB
   max_filter_output_size: 104857600  # bytes, default: 100MB
+  cache_max_entries: 10000  # max entries kept by the `cache` filter's TTL cache, LRU-evicted beyond this (default: 10000)
   read_timeout: 30s
   write_timeout: 30s
   shutdown_timeout: 10s
@@ -176,6 +177,7 @@ paths:
 - `server.read_timeout` / `write_timeout` / `shutdown_timeout`: must be > 0
 - `server.max_body_size`: must be > 0; default 10485760 (10 MB)
 - `server.max_filter_output_size`: must be > 0; default 104857600 (100 MB)
+- `server.cache_max_entries`: must be > 0; default 10000
 - `log.level`: one of `debug`, `info`, `warn`, `error`
 - `log.format`: one of `json`, `text`
 - `filters[].id`: unique and non-empty
@@ -496,6 +498,8 @@ Caching behavior:
 - **TTL**: time-to-live in seconds; expired entries are automatically cleaned up
 - **Key**: template-expanded string; each unique key holds one cached result
 - **Execution**: if a cache hit occurs (key exists and TTL not expired), the target filter is skipped and the cached result is returned
+- **Capacity**: at most `server.cache_max_entries` keys are kept; beyond that, the least-recently-used entry is evicted regardless of remaining TTL
+- **Concurrent misses**: concurrent requests that miss on the same key are collapsed into a single execution of the target filter (the rest wait for and share that result) instead of each running it independently
 - **Multi-instance**: each process maintains its own cache; no cross-instance synchronization (deploy with load balancer for distributed caching)
 
 Example:
@@ -644,6 +648,7 @@ type ServerConfig struct {
     ShutdownTimeout time.Duration `yaml:"shutdown_timeout"`
     MaxBodySize     int64         `yaml:"max_body_size"`
     MaxFilterOutputSize int64     `yaml:"max_filter_output_size"`
+    CacheMaxEntries int           `yaml:"cache_max_entries"`
 }
 
 type LogConfig struct {
@@ -799,6 +804,7 @@ Not hot-reloadable (restart required):
 - `server.shutdown_timeout`
 - `server.max_body_size`
 - `server.max_filter_output_size`
+- `server.cache_max_entries`
 
 Required logs:
 

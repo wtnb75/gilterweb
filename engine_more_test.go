@@ -13,7 +13,7 @@ import (
 )
 
 func newTestEngine() *Engine {
-	return NewEngine(defaultConfig(), map[string]FilterConfig{}, NewTTLCache(), nil)
+	return NewEngine(defaultConfig(), map[string]FilterConfig{}, NewTTLCache(1000), nil)
 }
 
 func TestExecEnvFilter(t *testing.T) {
