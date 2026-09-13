@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"text/template"
 	"time"
 
@@ -42,6 +43,30 @@ type Engine struct {
 	renderFuncs template.FuncMap
 	logger      *slog.Logger
 	cacheGroup  singleflight.Group
+
+	// tplCache/regexCache/jqCache memoize compilation of the (fixed, literal)
+	// template/regex/jq strings found in the loaded config, keyed by their
+	// source text. Filter params don't change between requests — only the
+	// reload-triggered NewEngine call replaces them — so compiling each
+	// distinct string once and reusing it avoids re-parsing on every request.
+	tplCache   sync.Map // string -> *compiledTemplate
+	regexCache sync.Map // string -> *compiledRegex
+	jqCache    sync.Map // string -> *compiledJQ
+}
+
+type compiledTemplate struct {
+	tpl *template.Template
+	err error
+}
+
+type compiledRegex struct {
+	re  *regexp.Regexp
+	err error
+}
+
+type compiledJQ struct {
+	q   *gojq.Query
+	err error
 }
 
 var ErrFilterOutputTooLarge = errors.New("filter output too large")
@@ -158,7 +183,7 @@ func (e *Engine) expandStatic(v any, data map[string]any, depth int) (any, error
 	}
 	switch x := v.(type) {
 	case string:
-		return renderTemplate(x, data, e.renderFuncs)
+		return e.renderTemplate(x, data)
 	case map[string]any:
 		out := map[string]any{}
 		for k, vv := range x {
@@ -184,8 +209,41 @@ func (e *Engine) expandStatic(v any, data map[string]any, depth int) (any, error
 	}
 }
 
-func renderTemplate(tpl string, data map[string]any, fn template.FuncMap) (string, error) {
-	t, err := template.New("tpl").Funcs(fn).Parse(tpl)
+func (e *Engine) compileTemplate(tpl string) (*template.Template, error) {
+	if v, ok := e.tplCache.Load(tpl); ok {
+		c := v.(*compiledTemplate)
+		return c.tpl, c.err
+	}
+	t, err := template.New("tpl").Funcs(e.renderFuncs).Parse(tpl)
+	actual, _ := e.tplCache.LoadOrStore(tpl, &compiledTemplate{tpl: t, err: err})
+	c := actual.(*compiledTemplate)
+	return c.tpl, c.err
+}
+
+func (e *Engine) compileRegex(pattern string) (*regexp.Regexp, error) {
+	if v, ok := e.regexCache.Load(pattern); ok {
+		c := v.(*compiledRegex)
+		return c.re, c.err
+	}
+	re, err := regexp.Compile(pattern)
+	actual, _ := e.regexCache.LoadOrStore(pattern, &compiledRegex{re: re, err: err})
+	c := actual.(*compiledRegex)
+	return c.re, c.err
+}
+
+func (e *Engine) compileJQ(query string) (*gojq.Query, error) {
+	if v, ok := e.jqCache.Load(query); ok {
+		c := v.(*compiledJQ)
+		return c.q, c.err
+	}
+	q, err := gojq.Parse(query)
+	actual, _ := e.jqCache.LoadOrStore(query, &compiledJQ{q: q, err: err})
+	c := actual.(*compiledJQ)
+	return c.q, c.err
+}
+
+func (e *Engine) renderTemplate(tpl string, data map[string]any) (string, error) {
+	t, err := e.compileTemplate(tpl)
 	if err != nil {
 		return "", err
 	}
@@ -220,7 +278,7 @@ var lookupEnv = func(k string) (string, bool) {
 func (e *Engine) renderStringMap(m map[string]string, data map[string]any) (map[string]string, error) {
 	out := make(map[string]string, len(m))
 	for k, v := range m {
-		rendered, err := renderTemplate(v, data, e.renderFuncs)
+		rendered, err := e.renderTemplate(v, data)
 		if err != nil {
 			return nil, err
 		}
@@ -234,25 +292,25 @@ func (e *Engine) execHTTPFilter(ctx context.Context, f FilterConfig, data map[st
 	if !ok {
 		return nil, fmt.Errorf("http params must be object")
 	}
-	unixSocket, err := renderTemplate(toString(params["unix_socket"]), data, e.renderFuncs)
+	unixSocket, err := e.renderTemplate(toString(params["unix_socket"]), data)
 	if err != nil {
 		return nil, err
 	}
-	method, err := renderTemplate(toString(params["method"]), data, e.renderFuncs)
+	method, err := e.renderTemplate(toString(params["method"]), data)
 	if err != nil {
 		return nil, err
 	}
 	if method == "" {
 		method = http.MethodGet
 	}
-	url, err := renderTemplate(toString(params["url"]), data, e.renderFuncs)
+	url, err := e.renderTemplate(toString(params["url"]), data)
 	if err != nil {
 		return nil, err
 	}
 	if url == "" {
 		return nil, fmt.Errorf("http.url required")
 	}
-	body, err := renderTemplate(toString(params["body"]), data, e.renderFuncs)
+	body, err := e.renderTemplate(toString(params["body"]), data)
 	if err != nil {
 		return nil, err
 	}
@@ -312,7 +370,7 @@ func (e *Engine) execExecFilter(ctx context.Context, f FilterConfig, data map[st
 	cmdArgs := make([]string, 0, len(rawCmd))
 	for _, v := range rawCmd {
 		argTpl := toString(v)
-		arg, err := renderTemplate(argTpl, data, e.renderFuncs)
+		arg, err := e.renderTemplate(argTpl, data)
 		if err != nil {
 			return nil, err
 		}
@@ -397,7 +455,7 @@ func (e *Engine) execJQFilter(f FilterConfig, data map[string]any) (any, error) 
 	if query == "" {
 		return nil, fmt.Errorf("jq.query required")
 	}
-	input, err := renderTemplate(inputTpl, data, e.renderFuncs)
+	input, err := e.renderTemplate(inputTpl, data)
 	if err != nil {
 		return nil, err
 	}
@@ -405,7 +463,7 @@ func (e *Engine) execJQFilter(f FilterConfig, data map[string]any) (any, error) 
 	if err := json.Unmarshal([]byte(input), &in); err != nil {
 		return nil, err
 	}
-	q, err := gojq.Parse(query)
+	q, err := e.compileJQ(query)
 	if err != nil {
 		return nil, err
 	}
@@ -427,7 +485,7 @@ func (e *Engine) execBase64Filter(f FilterConfig, data map[string]any) (any, err
 	}
 	inputTpl, _ := params["input"].(string)
 	op, _ := params["op"].(string)
-	in, err := renderTemplate(inputTpl, data, e.renderFuncs)
+	in, err := e.renderTemplate(inputTpl, data)
 	if err != nil {
 		return nil, err
 	}
@@ -458,11 +516,11 @@ func (e *Engine) execRegexFilter(f FilterConfig, data map[string]any) (any, erro
 	if multiline {
 		pattern = "(?m)" + pattern
 	}
-	re, err := regexp.Compile(pattern)
+	re, err := e.compileRegex(pattern)
 	if err != nil {
 		return nil, err
 	}
-	input, err := renderTemplate(inputTpl, data, e.renderFuncs)
+	input, err := e.renderTemplate(inputTpl, data)
 	if err != nil {
 		return nil, err
 	}
@@ -539,7 +597,7 @@ func (e *Engine) execCacheFilter(ctx context.Context, f FilterConfig, data map[s
 		ttl = parsed
 	}
 	keyTpl, _ := params["key"].(string)
-	key, err := renderTemplate(keyTpl, data, e.renderFuncs)
+	key, err := e.renderTemplate(keyTpl, data)
 	if err != nil {
 		return nil, err
 	}
