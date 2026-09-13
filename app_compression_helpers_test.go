@@ -73,6 +73,7 @@ func TestEncodeWriteAndCompressionFallback(t *testing.T) {
 
 	rw2 := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
 	route := &PathConfig{Method: "GET", Path: "/x", Filter: "A"}
 	cfg := CompressionConfig{
 		Enabled:    true,
