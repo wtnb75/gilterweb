@@ -330,14 +330,14 @@ func writeResultWithCompression(
 		_, _ = w.Write(body)
 		return
 	}
-	appendVaryHeader(w.Header(), "Accept-Encoding")
-	w.Header().Set("Content-Encoding", "gzip")
-	w.Header().Del("Content-Length")
 	zw, err := gzip.NewWriterLevel(w, cfg.Level)
 	if err != nil {
 		_, _ = w.Write(body)
 		return
 	}
+	appendVaryHeader(w.Header(), "Accept-Encoding")
+	w.Header().Set("Content-Encoding", "gzip")
+	w.Header().Del("Content-Length")
 	_, _ = zw.Write(body)
 	_ = zw.Close()
 }
