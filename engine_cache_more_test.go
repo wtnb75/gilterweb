@@ -11,10 +11,10 @@ import (
 )
 
 func TestCacheFilterSingleflightDedupesConcurrentMisses(t *testing.T) {
-	var calls int32
+	var calls atomic.Int32
 	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		atomic.AddInt32(&calls, 1)
+		calls.Add(1)
 		<-release
 		_, _ = w.Write([]byte("ok"))
 	}))
@@ -45,7 +45,7 @@ func TestCacheFilterSingleflightDedupesConcurrentMisses(t *testing.T) {
 	close(release)
 	wg.Wait()
 
-	if got := atomic.LoadInt32(&calls); got != 1 {
+	if got := calls.Load(); got != 1 {
 		t.Fatalf("expected backend to be called exactly once, got %d", got)
 	}
 }
